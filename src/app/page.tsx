@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { Loader2, ChevronRight, CircleCheck } from "lucide-react";
+import { useState, useMemo } from "react";
+
+import { Loader2, ChevronRight, CircleCheck, Globe, Info, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,6 +20,7 @@ import { CopyButton } from "@/components/CopyButton";
 import { DomaLogo } from "@/components/DomaLogo";
 import { MppLogo } from "@/components/MppLogo";
 import { useMppClient } from "@/hooks/useMppClient";
+import { useTokenStatus } from "@/hooks/useTokenStatus";
 
 const DEFAULT_PRIVATE_KEY = process.env.NEXT_PUBLIC_TESTNET_TEMPO_KEY_1 || "";
 
@@ -41,6 +43,25 @@ export default function Home() {
     makeRequest,
     resetInitialized,
   } = useMppClient(privateKey);
+
+  // Derive registered domain from trace
+  const registeredDomain = useMemo(() => {
+    if (loadingId || trace.length === 0) return null;
+    const lastResponse = [...trace].reverse().find(
+      (s) =>
+        s.type === "response" &&
+        s.data &&
+        typeof s.data === "object" &&
+        "status" in s.data &&
+        (s.data as { status: number }).status === 200 &&
+        "body" in s.data &&
+        (s.data as { body?: { txHash?: string } }).body?.txHash,
+    );
+    if (!lastResponse) return null;
+    return (lastResponse.data as { body: { domain: string } }).body.domain;
+  }, [loadingId, trace]);
+
+  const { tokenStatus, tokenStatusLoading } = useTokenStatus(registeredDomain, network);
 
   const isValidSld = (value: string) =>
     /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?$/.test(value.trim());
@@ -485,9 +506,86 @@ export default function Home() {
 
             {!loadingId && trace.length === 0 && (
               <div className="text-center py-12 text-muted-foreground">
-                <p>Initialize the client and click an endpoint to test</p>
+                <p>The MPP request/response flow will appear here after sending a request.</p>
               </div>
             )}
+          </CardContent>
+        </Card>
+
+        <Card className="mt-8">
+          <CardHeader>
+            <CardTitle className="text-2xl">4. Domain Token Status</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {!tokenStatusLoading && !tokenStatus && (
+              <div className="text-center py-12 text-muted-foreground">
+                <p>After a successful registration, domain tokenization status will appear here.</p>
+              </div>
+            )}
+            {tokenStatusLoading && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                  <span className="text-muted-foreground">
+                    Waiting for token to be minted for{" "}
+                    <span className="font-mono text-foreground">{registeredDomain}</span>...
+                  </span>
+                </div>
+                <div className="rounded-lg border bg-muted/50 p-4 space-y-2">
+                  <div className="h-3 bg-muted rounded animate-pulse w-1/3" />
+                  <div className="h-3 bg-muted rounded animate-pulse w-2/3" />
+                  <div className="h-3 bg-muted rounded animate-pulse w-1/2" />
+                  <div className="h-3 bg-muted rounded animate-pulse w-3/4" />
+                  <div className="h-3 bg-muted rounded animate-pulse w-1/4" />
+                </div>
+              </div>
+            )}
+            {tokenStatus && registeredDomain && (() => {
+              const appBase = network === "mainnet" ? "https://app.doma.xyz" : "https://app-testnet.doma.xyz";
+              const explorerBase = network === "mainnet" ? "https://explorer.doma.xyz" : "https://explorer-testnet.doma.xyz";
+              const domainUrl = `${appBase}/domain/${registeredDomain}`;
+              const tokenId = tokenStatus.tokenId as string | undefined;
+              const contractAddress = tokenStatus.contractAddress as string | undefined;
+              const explorerUrl = tokenId && contractAddress
+                ? `${explorerBase}/token/${contractAddress}/instance/${tokenId}`
+                : null;
+
+              return (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-x-8 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <CircleCheck className="h-5 w-5 text-green-500" />
+                      <span className="text-green-500 font-medium">Domain Tokenized</span>
+                    </div>
+                    <a
+                      href={domainUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 text-sm text-primary underline">
+                      <Globe className="h-4 w-4 shrink-0" />
+                      View on Doma
+                      <ExternalLink className="h-3 w-3 shrink-0" />
+                    </a>
+                    {explorerUrl && (
+                      <a
+                        href={explorerUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground underline">
+                        <Info className="h-4 w-4 shrink-0" />
+                        View on Explorer
+                        <ExternalLink className="h-3 w-3 shrink-0" />
+                      </a>
+                    )}
+                  </div>
+                  <div className="rounded-lg border bg-muted/50 p-4">
+                    <pre className="font-mono text-sm text-muted-foreground whitespace-pre-wrap break-all">
+                      {JSON.stringify(tokenStatus, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              );
+            })()}
           </CardContent>
         </Card>
 

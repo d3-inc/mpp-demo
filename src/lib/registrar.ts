@@ -4,9 +4,6 @@ export const SUPPORTED_TLDS = [
   "ai",
   "io",
   "net",
-  "cc",
-  "land",
-  "world",
   "cash",
   "live",
 ] as const;
@@ -44,29 +41,21 @@ export const DEFAULT_CONTACT: RegistrantContact = {
 };
 
 export interface Order {
-  id: string;
   domain: string;
-  amount: string;
+  amount: string; // human-readable USD (e.g. "29.99")
   registrantContact: RegistrantContact;
-}
-
-interface AvailabilityResult {
-  available: boolean;
-  order?: Order;
+  voucher: D3Voucher;
+  voucherSignature: string;
 }
 
 interface RegistrationResult {
   success: true;
   domain: string;
   network: string;
-  tokenId: string;
-  contractAddress: string;
-  expiresAt: string;
-  url: string;
-  explorerUrl: string;
+  txHash: string;
+  paymentContract: string;
+  voucherAmount: string;
 }
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function getD3Config(network: "testnet" | "mainnet") {
   const apiUrl =
@@ -85,42 +74,81 @@ function getD3Config(network: "testnet" | "mainnet") {
   return { apiUrl: apiUrl.replace(/\/+$/, ""), apiKey };
 }
 
-export async function getPricingAvailability(
-  domain: string,
+export interface D3PaymentOption {
+  networkId: string;
+  chainName: string;
+  contractAddress: string;
+  tokenAddress: string | null;
+  symbol: string | null;
+}
+
+export interface D3Voucher {
+  paymentId: string;
+  amount: string;
+  token: string;
+  buyer: string;
+  voucherExpiration: number;
+  orderId: string;
+}
+
+export interface D3OrderResult {
+  voucher: D3Voucher;
+  signature: string;
+}
+
+export async function getD3PaymentOptions(
+  network: "testnet" | "mainnet",
+  tld?: string,
+): Promise<D3PaymentOption[]> {
+  const { apiUrl, apiKey } = getD3Config(network);
+  const url = tld
+    ? `${apiUrl}/v1/partner/payment/options?tld=${encodeURIComponent(tld)}`
+    : `${apiUrl}/v1/partner/payment/options`;
+  const res = await fetch(url, { headers: { "Api-Key": apiKey } });
+  if (!res.ok) throw new Error(`D3 payment options failed: ${res.status}`);
+  const data: { options: D3PaymentOption[] } = await res.json();
+  return data.options;
+}
+
+export async function createD3Order(
+  sld: string,
+  tld: string,
+  buyerAddress: string,
   registrantContact: RegistrantContact,
   network: "testnet" | "mainnet",
-): Promise<AvailabilityResult> {
-  const dotIndex = domain.indexOf(".");
-  const sld = domain.slice(0, dotIndex);
-  const tld = domain.slice(dotIndex + 1);
-
+): Promise<D3OrderResult> {
   const { apiUrl, apiKey } = getD3Config(network);
 
-  const searchUrl = `${apiUrl}/v1/partner/search?sld=${encodeURIComponent(sld)}&tld=${encodeURIComponent(tld)}&skip=0&limit=1`;
-  const res = await fetch(searchUrl, {
-    headers: { "Api-Key": apiKey },
+  const paymentContract =
+    network === "mainnet"
+      ? process.env.DOMA_MAINNET_PAYMENT_CONTRACT
+      : process.env.DOMA_TESTNET_PAYMENT_CONTRACT;
+  const networkId = network === "mainnet" ? "eip155:97477" : "eip155:97476";
+
+  if (!paymentContract) throw new Error(`Missing DOMA_${network.toUpperCase()}_PAYMENT_CONTRACT`);
+
+  const res = await fetch(`${apiUrl}/v1/partner/order`, {
+    method: "POST",
+    headers: { "Api-Key": apiKey, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      paymentOptions: {
+        contractAddress: paymentContract,
+        networkId,
+        tokenAddress: null, // native ETH
+        buyerAddress,
+      },
+      names: [{ sld, tld, autoRenew: false, domainLength: 1 }],
+      couponCode: null,
+      registrantContact,
+    }),
   });
 
   if (!res.ok) {
-    throw new Error(`D3 search failed: ${res.status} ${res.statusText}`);
+    const body = await res.text();
+    throw new Error(`D3 order failed: ${res.status} ${body}`);
   }
 
-  const data: { pageItems: Array<{ sld: string; tld: string; status: string; registryUsdPrice: string | null; usdPrice: string | null }> } = await res.json();
-  const match = data.pageItems.find((item) => item.sld === sld && item.tld === tld);
-
-  if (!match || match.status !== "available") {
-    return { available: false };
-  }
-
-  const price = match.registryUsdPrice ?? match.usdPrice ?? "0";
-  const order: Order = {
-    id: crypto.randomUUID(),
-    domain,
-    amount: price,
-    registrantContact,
-  };
-
-  return { available: true, order };
+  return res.json();
 }
 
 /** Reconstruct an Order from HMAC-verified challenge meta. */
@@ -129,45 +157,101 @@ export function orderFromMeta(
   registrantContact: RegistrantContact,
 ): Order {
   return {
-    id: meta.orderId,
     domain: meta.domain,
     amount: meta.amount,
     registrantContact,
+    voucher: JSON.parse(meta.voucher) as D3Voucher,
+    voucherSignature: meta.voucherSignature,
   };
 }
+
+const PAYMENT_CONTRACT_ABI = [
+  {
+    name: "pay",
+    type: "function",
+    stateMutability: "payable",
+    inputs: [
+      {
+        name: "voucher",
+        type: "tuple",
+        components: [
+          { name: "buyer", type: "address" },
+          { name: "token", type: "address" },
+          { name: "amount", type: "uint256" },
+          { name: "voucherExpiration", type: "uint256" },
+          { name: "paymentId", type: "string" },
+          { name: "orderId", type: "string" },
+        ],
+      },
+      { name: "signature", type: "bytes" },
+    ],
+    outputs: [],
+  },
+] as const;
 
 export async function processRegistration(
   order: Order,
   network: "testnet" | "mainnet",
 ): Promise<RegistrationResult> {
-  // Simulate registration work
-  await sleep(5000);
+  const paymentContract =
+    network === "mainnet"
+      ? process.env.DOMA_MAINNET_PAYMENT_CONTRACT
+      : process.env.DOMA_TESTNET_PAYMENT_CONTRACT;
+  const funderKey =
+    network === "mainnet"
+      ? process.env.DOMA_MAINNET_FUNDER_KEY
+      : process.env.DOMA_TESTNET_FUNDER_KEY;
 
-  const expiration = new Date();
-  expiration.setFullYear(expiration.getFullYear() + 1);
+  if (!paymentContract || !funderKey) {
+    throw new Error(`Missing payment config for ${network}`);
+  }
 
-  const encoder = new TextEncoder();
-  const hashBuffer = await crypto.subtle.digest("SHA-256", encoder.encode(order.domain));
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const tokenId = BigInt(
-    "0x" + hashArray.map((b) => b.toString(16).padStart(2, "0")).join(""),
-  ).toString();
+  const { createWalletClient, createPublicClient, http } = await import("viem");
+  const { privateKeyToAccount } = await import("viem/accounts");
+  const { domaTestnet, doma } = await import("@/lib/chains");
 
-  const contractAddress = "0x424bDf2E8a6F52Bd2c1C81D9437b0DC0309DF90f";
+  const chain = network === "mainnet" ? doma : domaTestnet;
+  const account = privateKeyToAccount(funderKey as `0x${string}`);
 
-  const domaBase =
-    network === "mainnet" ? "https://app.doma.xyz" : "https://app-testnet.doma.xyz";
-  const explorerBase =
-    network === "mainnet" ? "https://explorer.doma.xyz" : "https://explorer-testnet.doma.xyz";
+  const walletClient = createWalletClient({
+    account,
+    chain,
+    transport: http(),
+  });
+
+  const publicClient = createPublicClient({
+    chain,
+    transport: http(),
+  });
+
+  const { voucher, voucherSignature } = order;
+
+  const txHash = await walletClient.writeContract({
+    address: paymentContract as `0x${string}`,
+    abi: PAYMENT_CONTRACT_ABI,
+    functionName: "pay",
+    args: [
+      {
+        buyer: voucher.buyer as `0x${string}`,
+        token: voucher.token as `0x${string}`,
+        amount: BigInt(voucher.amount),
+        voucherExpiration: BigInt(voucher.voucherExpiration),
+        paymentId: voucher.paymentId,
+        orderId: voucher.orderId,
+      },
+      voucherSignature as `0x${string}`,
+    ],
+    value: BigInt(voucher.amount), // send ETH with the tx
+  });
+
+  await publicClient.waitForTransactionReceipt({ hash: txHash });
 
   return {
     success: true,
     domain: order.domain,
     network,
-    tokenId,
-    contractAddress,
-    expiresAt: expiration.toISOString(),
-    url: `${domaBase}/domain/${order.domain}`,
-    explorerUrl: `${explorerBase}/token/${contractAddress}/instance/${tokenId}`,
+    txHash,
+    paymentContract,
+    voucherAmount: voucher.amount,
   };
 }

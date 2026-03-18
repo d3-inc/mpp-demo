@@ -2,7 +2,7 @@ import { Mppx, tempo } from "mppx/nextjs";
 import { Credential, Challenge } from "mppx";
 import {
   SUPPORTED_TLDS,
-  getPricingAvailability,
+  createD3Order,
   orderFromMeta,
   processRegistration,
   DEFAULT_CONTACT,
@@ -82,13 +82,14 @@ export async function GET(request: Request) {
     }
   }
 
-  // On the retry, reconstruct the order from the credential's HMAC-verified meta
-  // instead of re-querying pricing (which would produce a different amount/HMAC mismatch).
+  const sld = domain.slice(0, dotIndex);
+
+  // On the retry, reconstruct the order from the credential's HMAC-verified meta.
   if (request.headers.has("Authorization")) {
     const credential = Credential.fromRequest(request);
     const meta = Challenge.meta(credential.challenge);
 
-    if (!meta?.orderId || !meta?.domain || !meta?.amount) {
+    if (!meta?.domain || !meta?.amount || !meta?.voucher) {
       return Response.json({ error: "Invalid or missing order metadata." }, { status: 400 });
     }
 
@@ -103,46 +104,56 @@ export async function GET(request: Request) {
       }
     }
 
-    const originalOrder = orderFromMeta(meta, registrantContact);
+    const order = orderFromMeta(meta, registrantContact);
 
     const handler = mppx.charge({
-      amount: originalOrder.amount,
+      amount: order.amount,
       description: `Register ${domain}`,
       meta: {
-        orderId: originalOrder.id,
-        domain: originalOrder.domain,
-        amount: originalOrder.amount,
+        domain: order.domain,
+        amount: order.amount,
+        voucher: JSON.stringify(order.voucher),
+        voucherSignature: order.voucherSignature,
       },
     })(async () => {
-      const result = await processRegistration(originalOrder, network);
-      return Response.json({ ...result, order: originalOrder });
+      const result = await processRegistration(order, network);
+      return Response.json({ ...result, order });
     });
 
     return handler(request);
   }
 
-  // Initial request — check pricing and availability, issue 402
-  const availability = await getPricingAvailability(domain, registrantContact, network);
+  // Initial request — create D3 order to get voucher + USDC price, then issue 402
+  const funderAddress =
+    network === "mainnet"
+      ? process.env.DOMA_MAINNET_FUNDER_ADDRESS!
+      : process.env.DOMA_TESTNET_FUNDER_ADDRESS!;
 
-  if (!availability.available || !availability.order) {
+  let d3Order;
+  try {
+    d3Order = await createD3Order(sld, tld, funderAddress, registrantContact, network);
+  } catch {
     return Response.json(
       { error: `Domain '${domain}' is not available for registration.` },
       { status: 409 },
     );
   }
 
-  const { order } = availability;
+  const { voucher, signature } = d3Order;
+  // TODO: charge real price — for now hardcode $10 while paying D3 in ETH
+  const amount = "10.00";
 
   const handler = mppx.charge({
-    amount: order.amount,
+    amount,
     description: `Register ${domain}`,
     meta: {
-      orderId: order.id,
-      domain: order.domain,
-      amount: order.amount,
+      domain,
+      amount,
+      voucher: JSON.stringify(voucher),
+      voucherSignature: signature,
     },
   })(async () => {
-    // This callback won't run on the initial request (no credential → 402)
+    // Won't run on initial request (no credential → 402)
     return Response.json({ error: "Unexpected" }, { status: 500 });
   });
 
