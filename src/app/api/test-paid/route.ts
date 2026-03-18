@@ -10,10 +10,10 @@ const mppx = Mppx.create({
   ],
 });
 
-export const GET = mppx.charge({ amount: "0.01" })(() =>
+export const GET = mppx.charge({ amount: "0.10" })(() =>
   Response.json({
     success: true,
-    message: "Payment received! You paid $0.01 for this request.",
+    message: "Payment received! You paid $0.10 for this request.",
     timestamp: new Date().toISOString(),
   }),
 );

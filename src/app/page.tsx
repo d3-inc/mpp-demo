@@ -6,11 +6,16 @@ import { privateKeyToAccount } from "viem/accounts";
 import { tempoModerato } from "viem/chains";
 import { Mppx, tempo } from "mppx/client";
 import { CopyButton } from "@/components/CopyButton";
+import { Card, CardInner } from "@/components/Card";
+import { Button } from "@/components/Button";
+import { DomaLogo } from "@/components/DomaLogo";
+import { MppLogo } from "@/components/MppLogo";
 
-interface RequestResult {
-  status: number;
+interface TraceStep {
+  label: string;
+  timestamp: number;
+  type: "request" | "response" | "challenge" | "credential" | "error";
   data: unknown;
-  error?: string;
 }
 
 interface ClientInfo {
@@ -55,15 +60,21 @@ export default function Home() {
   const [privateKey, setPrivateKey] = useState<string>(DEFAULT_PRIVATE_KEY);
   const [accountAddress, setAccountAddress] = useState<string>("");
   const [isInitialized, setIsInitialized] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<RequestResult | null>(null);
+  const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [trace, setTrace] = useState<TraceStep[]>([]);
   const [clientInfo, setClientInfo] = useState<ClientInfo | null>(null);
   const [testnetDomain, setTestnetDomain] = useState("");
   const [mainnetDomain, setMainnetDomain] = useState("");
   const mppxRef = useRef<ReturnType<typeof Mppx.create> | null>(null);
+  const traceRef = useRef<TraceStep[]>([]);
 
   const isValidDomain = (value: string) =>
     /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z]{2,})+$/.test(value.trim());
+
+  const addTrace = useCallback((step: TraceStep) => {
+    traceRef.current = [...traceRef.current, step];
+    setTrace([...traceRef.current]);
+  }, []);
 
   const initializeClient = useCallback(async () => {
     if (!privateKey || !privateKey.startsWith("0x")) {
@@ -75,6 +86,56 @@ export default function Home() {
       const account = privateKeyToAccount(privateKey as `0x${string}`);
 
       const proxiedFetch = createProxiedFetch();
+
+      // Wrap fetch to trace requests and responses
+      const tracingFetch = async (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ): Promise<Response> => {
+        const url = typeof input === "string" ? input : input.toString();
+        const hasAuth = !!(init?.headers && new Headers(init.headers).get("Authorization"));
+
+        addTrace({
+          label: hasAuth ? "Retry with credential" : "Initial request",
+          timestamp: Date.now(),
+          type: "request",
+          data: {
+            url,
+            method: init?.method || "GET",
+            ...(hasAuth && { authorization: new Headers(init!.headers).get("Authorization") }),
+          },
+        });
+
+        const response = await proxiedFetch(input, init);
+
+        // Clone so the body can still be read downstream
+        const clone = response.clone();
+        let body: unknown;
+        try {
+          body = await clone.json();
+        } catch {
+          try {
+            body = await clone.text();
+          } catch {
+            body = null;
+          }
+        }
+
+        addTrace({
+          label: response.status === 402 ? "402 Payment Required" : `${response.status} Response`,
+          timestamp: Date.now(),
+          type: "response",
+          data: {
+            status: response.status,
+            ...(response.status === 402 && {
+              wwwAuthenticate: response.headers.get("WWW-Authenticate"),
+            }),
+            ...(response.status !== 402 && body != null && { body }),
+          },
+        });
+
+        return response;
+      };
 
       const walletClient = createWalletClient({
         account,
@@ -89,13 +150,42 @@ export default function Home() {
 
       const mppx = Mppx.create({
         polyfill: false,
-        fetch: proxiedFetch,
+        fetch: tracingFetch,
         methods: [
           tempo({
             account,
             getClient: () => walletClient,
           }),
         ],
+        onChallenge: async (challenge, { createCredential }) => {
+          addTrace({
+            label: "Challenge received",
+            timestamp: Date.now(),
+            type: "challenge",
+            data: {
+              id: challenge.id,
+              realm: challenge.realm,
+              method: challenge.method,
+              intent: challenge.intent,
+              request: challenge.request,
+              ...(challenge.description && { description: challenge.description }),
+              ...(challenge.expires && { expires: challenge.expires }),
+            },
+          });
+
+          const credential = await createCredential();
+
+          addTrace({
+            label: "Credential created",
+            timestamp: Date.now(),
+            type: "credential",
+            data: {
+              credential,
+            },
+          });
+
+          return credential;
+        },
       });
 
       mppxRef.current = mppx;
@@ -121,61 +211,74 @@ export default function Home() {
         },
       });
       setIsInitialized(true);
-      setResult(null);
+      setTrace([]);
+      traceRef.current = [];
     } catch (error) {
       alert(`Error initializing client: ${error}`);
     }
-  }, [privateKey]);
+  }, [privateKey, addTrace]);
 
   const makeRequest = useCallback(
-    async (url: string) => {
-      if (!isInitialized || !mppxRef.current) {
-        alert("Please initialize the MPP client first");
+    async (id: string, url: string) => {
+      if (!isInitialized || !mppxRef.current || loadingId) {
         return;
       }
 
-      setLoading(true);
-      setResult(null);
+      setLoadingId(id);
+      setTrace([]);
+      traceRef.current = [];
 
       try {
-        const response = await mppxRef.current.fetch(url);
-        const text = await response.text();
-
-        let data: unknown;
-        try {
-          data = JSON.parse(text);
-        } catch {
-          data = text;
-        }
-
-        setResult({
-          status: response.status,
-          data,
-        });
+        await mppxRef.current.fetch(url);
       } catch (error) {
-        setResult({
-          status: 0,
-          data: null,
-          error: error instanceof Error ? error.message : "Unknown error",
+        addTrace({
+          label: "Error",
+          timestamp: Date.now(),
+          type: "error",
+          data: { error: error instanceof Error ? error.message : "Unknown error" },
         });
       } finally {
-        setLoading(false);
+        setLoadingId(null);
       }
     },
-    [isInitialized],
+    [isInitialized, loadingId, addTrace],
   );
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-zinc-900 to-black text-white">
       <div className="container mx-auto px-4 py-16 max-w-4xl">
         <header className="text-center mb-12">
-          <h1 className="text-4xl font-bold mb-4 bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
-            MPP Demo
-          </h1>
-          <p className="text-zinc-400 text-lg">Machine Payments Protocol - Client & Server Demo</p>
+          <div className="flex items-center justify-center gap-4 mb-4">
+            <a
+              href="https://doma.xyz"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="cursor-pointer">
+              <DomaLogo className="h-10 w-auto text-zinc-400" />
+            </a>
+            <svg
+              className="w-6 h-6 text-zinc-500"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+            <a
+              href="https://mpp.dev"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="cursor-pointer">
+              <MppLogo className="h-8 w-auto" />
+            </a>
+          </div>
+          <p className="text-zinc-500 text-lg font-medium">Domain Registration with MPP (Demo)</p>
         </header>
 
-        <section className="bg-zinc-800/50 rounded-2xl p-8 mb-8 border border-zinc-700">
+        <Card className="mb-8">
           <h2 className="text-2xl font-semibold mb-6">1. Init Client</h2>
 
           <div className="space-y-4">
@@ -193,15 +296,16 @@ export default function Home() {
               />
             </div>
 
-            <button
+            <Button
               onClick={initializeClient}
               disabled={!privateKey || isInitialized}
-              className="w-full py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 rounded-lg font-semibold transition-colors">
+              variant="blue"
+              className="w-full py-3 font-semibold">
               {isInitialized ? "✓ Client Initialized" : "Initialize MPP Client"}
-            </button>
+            </Button>
 
             {accountAddress && clientInfo && (
-              <div className="bg-zinc-900 rounded-lg p-4 space-y-3">
+              <CardInner className="space-y-2">
                 <div>
                   <p className="text-sm text-zinc-400">Account Address:</p>
                   <div className="flex items-center gap-2">
@@ -214,57 +318,87 @@ export default function Home() {
                     </a>
                     <CopyButton value={accountAddress} />
                   </div>
+                  <p className="text-sm text-zinc-500 mt-1">{clientInfo.chain.name}</p>
                 </div>
-                <pre className="bg-zinc-950 rounded-lg p-4 overflow-x-auto text-sm">
-                  <code className="text-zinc-300">{JSON.stringify(clientInfo, null, 2)}</code>
-                </pre>
-              </div>
+                <details className="group">
+                  <summary className="text-xs text-zinc-500 cursor-pointer hover:text-zinc-400 transition-colors select-none">
+                    Client details
+                  </summary>
+                  <pre className="font-mono text-sm text-zinc-300 whitespace-pre-wrap break-all mt-2">
+                    {JSON.stringify(clientInfo, null, 2)}
+                  </pre>
+                </details>
+              </CardInner>
             )}
           </div>
-        </section>
+        </Card>
 
-        <section className="bg-zinc-800/50 rounded-2xl p-8 mb-8 border border-zinc-700">
+        <Card className="mb-8">
           <h2 className="text-2xl font-semibold mb-6">2. Endpoints</h2>
 
           <div className="space-y-6">
             <div className="space-y-4">
-              <h3 className="text-sm font-medium text-zinc-400 uppercase tracking-wider">Ping Tests</h3>
+              <h3 className="text-base font-bold text-zinc-300 uppercase tracking-wider">
+                Testing
+              </h3>
 
-              <div className="flex items-center justify-between bg-zinc-900 rounded-lg p-4">
+              <CardInner className="flex items-center justify-between">
                 <div>
                   <p className="font-mono text-sm">mpp.dev/api/ping/paid</p>
-                  <p className="text-xs text-zinc-500 mt-1">Official MPP test endpoint (external)</p>
+                  <p className="text-sm text-zinc-500 mt-1">
+                    Official MPP test endpoint (external)
+                  </p>
                 </div>
-                <button
-                  onClick={() => makeRequest("https://mpp.dev/api/ping/paid")}
-                  disabled={!isInitialized || loading}
-                  className="px-4 py-2 bg-green-600 hover:bg-green-500 disabled:bg-zinc-700 disabled:text-zinc-500 rounded-lg text-sm font-medium transition-colors cursor-pointer shrink-0 ml-4">
-                  Send ($0.01)
-                </button>
-              </div>
+                <Button
+                  onClick={() => makeRequest("ping-external", "https://mpp.dev/api/ping/paid")}
+                  disabled={!isInitialized}
+                  loading={loadingId === "ping-external"}
+                  className="ml-4">
+                  Send ($0.10)
+                </Button>
+              </CardInner>
 
-              <div className="flex items-center justify-between bg-zinc-900 rounded-lg p-4">
+              <CardInner className="flex items-center justify-between">
                 <div>
-                  <p className="font-mono text-sm">/api/test</p>
-                  <p className="text-xs text-zinc-500 mt-1">Local server endpoint ($0.01/request)</p>
+                  <p className="font-mono text-sm">/api/test-paid</p>
+                  <p className="text-sm text-zinc-500 mt-1">Local server endpoint</p>
                 </div>
-                <button
-                  onClick={() => makeRequest("/api/test")}
-                  disabled={!isInitialized || loading}
-                  className="px-4 py-2 bg-green-600 hover:bg-green-500 disabled:bg-zinc-700 disabled:text-zinc-500 rounded-lg text-sm font-medium transition-colors cursor-pointer shrink-0 ml-4">
-                  Send ($0.01)
-                </button>
-              </div>
+                <Button
+                  onClick={() => makeRequest("ping-local", "/api/test-paid")}
+                  disabled={!isInitialized}
+                  loading={loadingId === "ping-local"}
+                  className="ml-4">
+                  Send ($0.10)
+                </Button>
+              </CardInner>
+
+              <CardInner className="flex items-center justify-between">
+                <div>
+                  <p className="font-mono text-sm">/api/test-overpay</p>
+                  <p className="text-sm text-zinc-500 mt-1">
+                    Insufficient funds (requests $999,999,999)
+                  </p>
+                </div>
+                <Button
+                  onClick={() => makeRequest("ping-overpay", "/api/test-overpay")}
+                  disabled={!isInitialized}
+                  loading={loadingId === "ping-overpay"}
+                  className="ml-4">
+                  Send ($999M)
+                </Button>
+              </CardInner>
             </div>
 
             <div className="space-y-4">
-              <h3 className="text-sm font-medium text-zinc-400 uppercase tracking-wider">Domain Registration</h3>
+              <h3 className="text-base font-bold text-zinc-300 uppercase tracking-wider">
+                Domain Registration
+              </h3>
 
-              <div className="bg-zinc-900 rounded-lg p-4">
+              <CardInner>
                 <div className="flex items-center justify-between mb-2">
                   <div>
-                    <p className="font-mono text-sm">Register (Testnet)</p>
-                    <p className="text-xs text-zinc-500 mt-1">Register a domain on DOMA Testnet</p>
+                    <p className="font-mono text-sm">Register (DOMA Testnet)</p>
+                    <p className="text-sm text-zinc-500 mt-1">Register a domain on DOMA Testnet</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 mt-3">
@@ -273,22 +407,28 @@ export default function Home() {
                     value={testnetDomain}
                     onChange={(e) => setTestnetDomain(e.target.value)}
                     placeholder="example.com"
-                    className="flex-1 bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 font-mono text-sm focus:outline-none focus:border-blue-500 max-w-xs"
+                    className="flex-1 bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 font-mono text-sm focus:outline-none focus:border-blue-500"
                   />
-                  <button
-                    onClick={() => alert(`domain to register: ${testnetDomain.trim()}`)}
-                    disabled={!isInitialized || loading || !isValidDomain(testnetDomain)}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 rounded-lg text-sm font-medium transition-colors cursor-pointer shrink-0">
+                  <Button
+                    onClick={() =>
+                      makeRequest(
+                        "register-testnet",
+                        `/api/register/testnet?domain=${encodeURIComponent(testnetDomain.trim())}`,
+                      )
+                    }
+                    disabled={!isInitialized || !isValidDomain(testnetDomain)}
+                    loading={loadingId === "register-testnet"}
+                    variant="blue">
                     Register ($12.88)
-                  </button>
+                  </Button>
                 </div>
-              </div>
+              </CardInner>
 
-              <div className="bg-zinc-900 rounded-lg p-4">
+              <CardInner>
                 <div className="flex items-center justify-between mb-2">
                   <div>
-                    <p className="font-mono text-sm">Register (Mainnet)</p>
-                    <p className="text-xs text-zinc-500 mt-1">Register a domain on DOMA Mainnet</p>
+                    <p className="font-mono text-sm">Register (DOMA Mainnet)</p>
+                    <p className="text-sm text-zinc-500 mt-1">Register a domain on DOMA Mainnet</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 mt-3">
@@ -297,69 +437,132 @@ export default function Home() {
                     value={mainnetDomain}
                     onChange={(e) => setMainnetDomain(e.target.value)}
                     placeholder="example.com"
-                    className="flex-1 bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 font-mono text-sm focus:outline-none focus:border-blue-500 max-w-xs"
+                    className="flex-1 bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-2 font-mono text-sm focus:outline-none focus:border-blue-500"
                   />
-                  <button
-                    onClick={() => alert(`domain to register: ${mainnetDomain.trim()}`)}
-                    disabled={!isInitialized || loading || !isValidDomain(mainnetDomain)}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 rounded-lg text-sm font-medium transition-colors cursor-pointer shrink-0">
+                  <Button
+                    onClick={() =>
+                      makeRequest(
+                        "register-mainnet",
+                        `/api/register/mainnet?domain=${encodeURIComponent(mainnetDomain.trim())}`,
+                      )
+                    }
+                    disabled={!isInitialized || !isValidDomain(mainnetDomain)}
+                    loading={loadingId === "register-mainnet"}
+                    variant="blue">
                     Register ($12.88)
-                  </button>
+                  </Button>
                 </div>
-              </div>
+              </CardInner>
             </div>
           </div>
-        </section>
+        </Card>
 
-        <section className="bg-zinc-800/50 rounded-2xl p-8 border border-zinc-700">
-          <h2 className="text-2xl font-semibold mb-6">3. Response</h2>
+        <Card>
+          <h2 className="text-2xl font-semibold mb-6">3. Request Flow</h2>
 
-          {loading && (
+          {loadingId && trace.length === 0 && (
             <div className="flex items-center justify-center py-12">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-              <span className="ml-3 text-zinc-400">Processing payment...</span>
+              <span className="ml-3 text-zinc-400">Starting request...</span>
             </div>
           )}
 
-          {!loading && result && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <span
-                  className={`px-3 py-1 rounded-full text-sm font-semibold ${
-                    result.status === 200
-                      ? "bg-green-600/30 text-green-400"
-                      : result.status === 402
-                        ? "bg-yellow-600/30 text-yellow-400"
-                        : "bg-red-600/30 text-red-400"
-                  }`}>
-                  Status: {result.status}
-                </span>
-              </div>
+          {trace.length > 0 && (
+            <div className="space-y-0">
+              {trace.map((step, i) => {
+                const colors = {
+                  request: "border-blue-500 text-blue-400",
+                  response:
+                    step.data && typeof step.data === "object" && "status" in step.data
+                      ? (step.data as { status: number }).status === 402
+                        ? "border-yellow-500 text-yellow-400"
+                        : (step.data as { status: number }).status === 200
+                          ? "border-green-500 text-green-400"
+                          : "border-red-500 text-red-400"
+                      : "border-zinc-500 text-zinc-400",
+                  challenge: "border-purple-500 text-purple-400",
+                  credential: "border-cyan-500 text-cyan-400",
+                  error: "border-red-500 text-red-400",
+                };
+                const color = colors[step.type];
+                const borderColor = color.split(" ")[0];
+                const textColor = color.split(" ")[1];
+                const isLast = i === trace.length - 1;
 
-              <pre className="bg-zinc-900 rounded-lg p-4 overflow-x-auto text-sm">
-                <code className="text-zinc-300">
-                  {JSON.stringify(result.data || result.error, null, 2)}
-                </code>
-              </pre>
+                const showLine = !isLast || !!loadingId;
+
+                return (
+                  <div key={i} className="flex gap-4">
+                    <div className="flex flex-col items-center pt-1">
+                      <div
+                        className={`w-3 h-3 rounded-full border-2 ${borderColor} bg-zinc-900 shrink-0`}
+                      />
+                      {showLine && <div className="w-px flex-1 bg-zinc-700 mt-2" />}
+                    </div>
+                    <div className="flex-1 pb-5">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className={`text-sm font-semibold ${textColor}`}>{step.label}</span>
+                        {i > 0 && (
+                          <span className="text-xs text-zinc-600">
+                            +{step.timestamp - trace[0].timestamp}ms
+                          </span>
+                        )}
+                      </div>
+                      <CardInner>
+                        <pre className="font-mono text-xs text-zinc-300 whitespace-pre-wrap break-all">
+                          {JSON.stringify(step.data, null, 2)}
+                        </pre>
+                      </CardInner>
+                    </div>
+                  </div>
+                );
+              })}
+              {loadingId && (
+                <div className="flex gap-4">
+                  <div className="flex flex-col items-center pt-1">
+                    <div className="w-3 h-3 rounded-full border-2 border-zinc-500 bg-zinc-900 shrink-0 animate-pulse" />
+                  </div>
+                  <div className="flex-1 pb-5">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-sm text-zinc-500 animate-pulse">Processing...</span>
+                    </div>
+                    <CardInner>
+                      <div className="space-y-2">
+                        <div className="h-3 bg-zinc-700/50 rounded animate-pulse w-3/4" />
+                        <div className="h-3 bg-zinc-700/50 rounded animate-pulse w-1/2" />
+                        <div className="h-3 bg-zinc-700/50 rounded animate-pulse w-2/3" />
+                      </div>
+                    </CardInner>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
-          {!loading && !result && (
+          {!loadingId && trace.length === 0 && (
             <div className="text-center py-12 text-zinc-500">
               <p>Initialize the client and click an endpoint to test</p>
             </div>
           )}
-        </section>
+        </Card>
 
         <footer className="mt-12 text-center text-zinc-500 text-sm">
           <p>
-            MPP Demo • Built with Next.js and{" "}
+            Built with{" "}
+            <a
+              href="https://doma.xyz"
+              className="text-blue-400 hover:underline"
+              target="_blank"
+              rel="noopener noreferrer">
+              DOMA
+            </a>
+            {" and "}
             <a
               href="https://mpp.dev"
               className="text-blue-400 hover:underline"
               target="_blank"
               rel="noopener noreferrer">
-              mppx
+              MPP
             </a>
           </p>
         </footer>
