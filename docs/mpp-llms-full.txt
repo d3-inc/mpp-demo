@@ -1,6 +1,6 @@
 # Machine Payments Protocol
 
-The open protocol for internet payments.
+The open protocol for machine-to-machine payments.
 
 <!--
 Sitemap:
@@ -584,6 +584,13 @@ When a server responds with `402` Payment Required, the `WWW-Authenticate` heade
     ```
   </Tab>
 
+  <Tab title="Card">
+    ```http
+    HTTP/1.1 402 Payment Required
+    WWW-Authenticate: Payment method="card", intent="charge", ...
+    ```
+  </Tab>
+
   <Tab title="Lightning">
     ```http
     HTTP/1.1 402 Payment Required
@@ -598,6 +605,8 @@ When a server responds with `402` Payment Required, the `WWW-Authenticate` heade
   <TempoMethodCard />
 
   <StripeMethodCard />
+
+  <CardMethodCard />
 
   <LightningMethodCard />
 
@@ -3090,7 +3099,7 @@ Each payment method defines how charge is fulfilled, verified, and settled on it
 
 # Card \[Card payments via encrypted network tokens]
 
-The Card method enables payments using agentic network tokens, single-use, encrypted credentials provisioned by a card network for machine-initiated transactions. Tokens such as [Visa Intelligent Commerce](https://developer.visa.com/capabilities/visa-intelligent-commerce) settle through existing card infrastructure, and the client and server can each use independent payment providers rather than sharing a single platform.
+The Card method enables payments using encrypted, single use network payment tokens and dynamic data provided by a card network for machine-initiated transactions. Payment tokens, such as those provided by [Visa Intelligent Commerce](https://developer.visa.com/capabilities/visa-intelligent-commerce), settle through existing card infrastructure, and the client and server can each use independent payment providers rather than sharing a single platform.
 
 The [`mpp-card`](https://www.npmjs.com/package/mpp-card) SDK implements the `card` method with the `charge` intent. The protocol is defined in the [Card Network Charge Intent](https://paymentauth.org/draft-card-charge-00) specification.
 
@@ -3550,21 +3559,29 @@ Tempo is purpose-built for the payment patterns MPP enables:
 
 Tempo supports server-paid transaction fees for both charge and session intents. When enabled, the client signs only the payment authorization and the server covers gas costs. The client doesn't need to hold gas tokens or understand fee mechanics.
 
-Set `feePayer: true` in the Challenge request to enable this:
+Pass a `feePayer` account to `tempo()` to enable this:
 
 ```ts twoslash
 import { Mppx, tempo } from 'mppx/server'
+import { privateKeyToAccount } from 'viem/accounts'
 
-const mppx = Mppx.create({ methods: [tempo()] })
+const mppx = Mppx.create({
+  methods: [tempo({
+    feePayer: privateKeyToAccount('0x…'), // [!code hl]
+  })],
+})
+```
 
-declare const request: Request
-// ---cut---
-const response = await mppx.charge({
-  amount: '0.1',
-  currency: '0x20c0000000000000000000000000000000000000',
-  feePayer: true, // [!code hl]
-  recipient: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
-})(request)
+It is also possible to point the `feePayer` to a fee service that supports the [`Handler.feePayer`](https://docs.tempo.xyz/sdk/typescript/server/handler.feePayer) endpoint:
+
+```ts
+import { Mppx, tempo } from 'mppx/server'
+
+const mppx = Mppx.create({
+  methods: [tempo({
+    feePayer: 'https://sponsor.example.com', // [!code hl]
+  })],
+})
 ```
 
 # Challenges \[Server-issued payment requirements]
@@ -3911,7 +3928,7 @@ The [Tempo Wallet](https://wallet.tempo.xyz) is a managed MPP client with built 
     Paste this into your agent to set up Tempo Wallet:
 
     ```
-    Read https://wallet.tempo.xyz/SKILL.md and set up tempo
+    Read https://tempo.xyz/SKILL.md and set up tempo
     ```
   </Tab>
 
@@ -4463,7 +4480,21 @@ const mppx = Mppx.create({
 })
 ```
 
-When a pull-mode client submits a signed transaction, the server co-signs with the fee payer account before broadcasting. Push-mode clients pay their own gas, so `feePayer` is ignored for those requests.
+It is possible to pass a [fee payer service](https://docs.tempo.xyz/sdk/typescript/server/handler.feePayer) URL instead:
+
+```ts
+import { Mppx, tempo } from 'mppx/server'
+
+const mppx = Mppx.create({
+  methods: [tempo({
+    currency: '0x20c0000000000000000000000000000000000000',
+    feePayer: 'https://sponsor.example.com', // [!code focus]
+    recipient: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
+  })],
+})
+```
+
+When a pull-mode client submits a signed transaction, the server co-signs with the fee payer account (or delegates to the relay) before broadcasting. Push-mode clients pay their own gas, so `feePayer` is ignored for those requests.
 
 ### Optimistic verification
 
@@ -6392,8 +6423,8 @@ Sessions use the `TempoStreamChannel` escrow contract for on-chain deposits, set
 
 | Network | Chain ID | Contract Address |
 |---|---|---|
-| [Mainnet](https://explore.mainnet.tempo.xyz/address/0x33b901018174DDabE4841042ab76ba85D4e24f25?tab=contract) | 98865 | `0x33b901018174DDabE4841042ab76ba85D4e24f25` |
-| [Testnet (Moderato)](https://explore.testnet.tempo.xyz/address/0x9d136eEa063eDE5418A6BC7bEafF009bBb6CFa70?tab=contract) | 42431 | `0x9d136eEa063eDE5418A6BC7bEafF009bBb6CFa70` |
+| [Mainnet](https://explore.mainnet.tempo.xyz/address/0x33b901018174DDabE4841042ab76ba85D4e24f25?tab=contract) | 4217 | `0x33b901018174DDabE4841042ab76ba85D4e24f25` |
+| [Testnet (Moderato)](https://explore.testnet.tempo.xyz/address/0xe1c4d3dce17bc111181ddf716f75bae49e61a336?tab=contract) | 42431 | `0xe1c4d3dce17bc111181ddf716f75bae49e61a336` |
 
 ## Specification
 
@@ -7729,11 +7760,11 @@ $ mppx init --force
 Sign a payment Challenge and output the `Authorization` header value without making a request. Accepts a challenge via `--challenge` or stdin.
 
 ```bash [terminal]
-$ mppx sign --challenge 'Payment method="tempo-session";chain-id=98865;...'
+$ mppx sign --challenge 'Payment method="tempo-session";chain-id=4217;...'
 ```
 
 ```bash [terminal]
-$ echo 'Payment method="tempo-session";chain-id=98865;...' | mppx sign
+$ echo 'Payment method="tempo-session";chain-id=4217;...' | mppx sign
 ```
 
 Use `--dry-run` to validate and parse a Challenge without signing:
@@ -11191,9 +11222,9 @@ Decimal places for amount parsing.
 
 ### feePayer (optional)
 
-* **Type:** `Account`
+* **Type:** `Account | string | true`
 
-Account for sponsoring transaction fees.
+Account or URL for sponsoring transaction fees. Pass a viem `Account` to co-sign locally, a URL string to delegate to a remote [fee payer service](https://docs.tempo.xyz/sdk/typescript/server/handler.feePayer), or `true` when the `account` parameter doubles as the fee payer.
 
 ### getClient (optional)
 
@@ -11314,9 +11345,9 @@ External identifier for the payment.
 
 ### feePayer (optional)
 
-* **Type:** `Account`
+* **Type:** `Account | string | true`
 
-Account for sponsoring transaction fees.
+Account or URL for sponsoring transaction fees. Pass a viem `Account` to co-sign locally, a URL string to delegate to a remote [fee payer service](https://docs.tempo.xyz/sdk/typescript/server/handler.feePayer), or `true` when the `account` parameter doubles as the fee payer.
 
 ### getClient (optional)
 
@@ -11478,9 +11509,9 @@ Escrow contract address for the payment channel. Defaults to the canonical escro
 
 ### feePayer (optional)
 
-* **Type:** `Account`
+* **Type:** `Account | string | true`
 
-Account for sponsoring open and top-up transaction fees.
+Account or URL for sponsoring open and top-up transaction fees. Pass a viem `Account` to co-sign locally, a URL string to delegate to a remote [fee payer service](https://docs.tempo.xyz/sdk/typescript/server/handler.feePayer), or `true` when the `account` parameter doubles as the fee payer.
 
 ### getClient (optional)
 
@@ -11572,7 +11603,7 @@ const txHash = await tempo.settle(store, client, '0xchannelId...')
 * **client** — `Client` — A viem client for on-chain interaction.
 * **channelId** — `Hex` — The channel to settle.
 * **options.escrowContract** (optional) — `Address` — Escrow contract override.
-* **options.feePayer** (optional) — `Account` — Fee payer account.
+* **options.feePayer** (optional) — `Account | string` — Fee payer account or relay URL.
 
 #### Return type
 

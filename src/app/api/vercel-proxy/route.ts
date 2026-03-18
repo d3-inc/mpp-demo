@@ -1,43 +1,5 @@
 import { NextRequest } from "next/server";
 
-let cachedJwt: string | null = null;
-let jwtExpiry: number = 0;
-
-async function getVercelJwt(): Promise<string> {
-  if (cachedJwt && Date.now() < jwtExpiry) {
-    return cachedJwt;
-  }
-
-  const password = process.env.MPP_DEV_AUTH;
-  if (!password) {
-    throw new Error("MPP_DEV_AUTH not configured");
-  }
-
-  const response = await fetch("https://mpp.dev/", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: `_vercel_password=${encodeURIComponent(password)}`,
-    redirect: "manual",
-  });
-
-  const setCookie = response.headers.get("set-cookie");
-  if (!setCookie) {
-    throw new Error("Failed to authenticate with Vercel");
-  }
-
-  const jwtMatch = setCookie.match(/_vercel_jwt=([^;]+)/);
-  if (!jwtMatch) {
-    throw new Error("JWT not found in response");
-  }
-
-  cachedJwt = jwtMatch[1];
-  jwtExpiry = Date.now() + 7 * 24 * 60 * 60 * 1000; // Cache for 7 days
-
-  return cachedJwt;
-}
-
 export async function GET(request: NextRequest) {
   const url = request.nextUrl.searchParams.get("url");
 
@@ -50,10 +12,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const jwt = await getVercelJwt();
-
     const headers = new Headers();
-    headers.set("Cookie", `_vercel_jwt=${jwt}`);
 
     const authHeader = request.headers.get("Authorization");
     if (authHeader) {
@@ -98,10 +57,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const jwt = await getVercelJwt();
-
     const headers = new Headers();
-    headers.set("Cookie", `_vercel_jwt=${jwt}`);
 
     const authHeader = request.headers.get("Authorization");
     if (authHeader) {
