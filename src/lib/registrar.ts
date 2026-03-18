@@ -74,6 +74,24 @@ function getD3Config(network: "testnet" | "mainnet") {
   return { apiUrl: apiUrl.replace(/\/+$/, ""), apiKey };
 }
 
+/** Search D3 for domain availability and USD pricing. */
+export async function searchAvailability(
+  sld: string,
+  tld: string,
+  network: "testnet" | "mainnet",
+): Promise<{ available: boolean; usdPrice: string | null }> {
+  const { apiUrl, apiKey } = getD3Config(network);
+  const res = await fetch(
+    `${apiUrl}/v1/partner/search?sld=${encodeURIComponent(sld)}&tld=${encodeURIComponent(tld)}&skip=0&limit=1`,
+    { headers: { "Api-Key": apiKey } },
+  );
+  if (!res.ok) throw new Error(`D3 search failed: ${res.status}`);
+  const data: { pageItems: Array<{ sld: string; tld: string; status: string; registryUsdPrice: string | null; usdPrice: string | null }> } = await res.json();
+  const match = data.pageItems.find((item) => item.sld === sld && item.tld === tld);
+  if (!match || match.status !== "available") return { available: false, usdPrice: null };
+  return { available: true, usdPrice: match.registryUsdPrice ?? match.usdPrice };
+}
+
 export interface D3PaymentOption {
   networkId: string;
   chainName: string;
@@ -241,7 +259,7 @@ export async function processRegistration(
       },
       voucherSignature as `0x${string}`,
     ],
-    value: BigInt(voucher.amount), // send ETH with the tx
+    value: BigInt(voucher.amount),
   });
 
   await publicClient.waitForTransactionReceipt({ hash: txHash });

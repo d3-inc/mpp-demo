@@ -2,6 +2,7 @@ import { Mppx, tempo } from "mppx/nextjs";
 import { Credential, Challenge } from "mppx";
 import {
   SUPPORTED_TLDS,
+  searchAvailability,
   createD3Order,
   orderFromMeta,
   processRegistration,
@@ -116,14 +117,27 @@ export async function GET(request: Request) {
         voucherSignature: order.voucherSignature,
       },
     })(async () => {
-      const result = await processRegistration(order, network);
-      return Response.json({ ...result, order });
+      try {
+        const result = await processRegistration(order, network);
+        return Response.json({ ...result, order });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return Response.json({ error: message }, { status: 500 });
+      }
     });
 
     return handler(request);
   }
 
-  // Initial request — create D3 order to get voucher + USDC price, then issue 402
+  // Initial request — check availability + USD price, create ETH order for voucher, issue 402
+  const search = await searchAvailability(sld, tld, network);
+  if (!search.available || !search.usdPrice) {
+    return Response.json(
+      { error: `Domain '${domain}' is not available for registration.` },
+      { status: 409 },
+    );
+  }
+
   const funderAddress =
     network === "mainnet"
       ? process.env.DOMA_MAINNET_FUNDER_ADDRESS!
@@ -132,16 +146,16 @@ export async function GET(request: Request) {
   let d3Order;
   try {
     d3Order = await createD3Order(sld, tld, funderAddress, registrantContact, network);
-  } catch {
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     return Response.json(
-      { error: `Domain '${domain}' is not available for registration.` },
+      { error: message },
       { status: 409 },
     );
   }
 
   const { voucher, signature } = d3Order;
-  // TODO: charge real price — for now hardcode $10 while paying D3 in ETH
-  const amount = "10.00";
+  const amount = parseFloat(search.usdPrice).toFixed(2);
 
   const handler = mppx.charge({
     amount,
