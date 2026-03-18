@@ -9,6 +9,13 @@ import {
   type RegistrantContact,
 } from "@/lib/registrar";
 
+const ALLOWED_MAINNET_ADDRESSES = new Set(
+  (process.env.ALLOWED_DOMA_MAINNET_ADDRESSES || "")
+    .split(",")
+    .map((a) => a.trim().toLowerCase())
+    .filter(Boolean),
+);
+
 const mppx = Mppx.create({
   methods: [
     tempo({
@@ -53,6 +60,17 @@ export async function GET(request: Request) {
     );
   }
 
+  // Restrict mainnet to allowed addresses (check early, before payment)
+  if (network === "mainnet") {
+    const address = url.searchParams.get("address")?.toLowerCase();
+    if (!address || !ALLOWED_MAINNET_ADDRESSES.has(address)) {
+      return Response.json(
+        { error: "This account is not authorized for mainnet registration." },
+        { status: 403 },
+      );
+    }
+  }
+
   // Parse registrant contact from query param, fall back to defaults
   let registrantContact: RegistrantContact = DEFAULT_CONTACT;
   const contactParam = url.searchParams.get("contact");
@@ -72,6 +90,17 @@ export async function GET(request: Request) {
 
     if (!meta?.orderId || !meta?.domain || !meta?.amount) {
       return Response.json({ error: "Invalid or missing order metadata." }, { status: 400 });
+    }
+
+    // Verified mainnet check — credential.source is cryptographically bound to the payer's key
+    if (network === "mainnet") {
+      const payerAddress = credential.source?.split(":").pop()?.toLowerCase();
+      if (!payerAddress || !ALLOWED_MAINNET_ADDRESSES.has(payerAddress)) {
+        return Response.json(
+          { error: "This account is not authorized for mainnet registration." },
+          { status: 403 },
+        );
+      }
     }
 
     const originalOrder = orderFromMeta(meta, registrantContact);

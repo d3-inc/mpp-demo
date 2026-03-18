@@ -20,7 +20,7 @@ import { DomaLogo } from "@/components/DomaLogo";
 import { MppLogo } from "@/components/MppLogo";
 import { useMppClient } from "@/hooks/useMppClient";
 
-const DEFAULT_PRIVATE_KEY = process.env.NEXT_PUBLIC_TEST_PRIVATE_KEY_1 || "";
+const DEFAULT_PRIVATE_KEY = process.env.NEXT_PUBLIC_TESTNET_TEMPO_KEY_1 || "";
 
 export default function Home() {
   const [privateKey, setPrivateKey] = useState(DEFAULT_PRIVATE_KEY);
@@ -373,7 +373,7 @@ export default function Home() {
                   onClick={() =>
                     makeRequest(
                       `register-${network}`,
-                      `/api/register?domain=${encodeURIComponent(domainName.trim() + "." + domainTld)}&network=${network}&contact=${encodeURIComponent(JSON.stringify(contact))}`,
+                      `/api/register?domain=${encodeURIComponent(domainName.trim() + "." + domainTld)}&network=${network}&address=${encodeURIComponent(accountAddress)}&contact=${encodeURIComponent(JSON.stringify(contact))}`,
                     )
                   }
                   disabled={!isInitialized || !isValidSld(domainName) || !!loadingId}
