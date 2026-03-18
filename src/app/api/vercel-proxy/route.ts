@@ -8,9 +8,9 @@ async function getVercelJwt(): Promise<string> {
     return cachedJwt;
   }
 
-  const password = process.env.VERCEL_AUTH_KEY;
+  const password = process.env.MPP_DEV_AUTH;
   if (!password) {
-    throw new Error("VERCEL_AUTH_KEY not configured");
+    throw new Error("MPP_DEV_AUTH not configured");
   }
 
   const response = await fetch("https://mpp.dev/", {
