@@ -6,6 +6,7 @@ export const SUPPORTED_TLDS = [
   "net",
   "cash",
   "live",
+  "fyi",
 ] as const;
 
 export interface RegistrantContact {

@@ -42,15 +42,41 @@ const response = await mppx.fetch(url)
 ## The /register endpoint
 
 ```
-GET /api/register/{network}?domain={domain}
+GET /api/register?domain={domain}&network={network}&address={address}&contact={contact}
 ```
 
-| Parameter | Location | Values | Description |
-|-----------|----------|--------|-------------|
-| `network` | path | `"testnet"` or `"mainnet"` | Which Doma network to register on |
-| `domain` | query | e.g. `"example.com"` | The domain name to register |
+| Parameter | Location | Required | Description |
+|-----------|----------|----------|-------------|
+| `domain` | query | yes | Full domain including TLD (e.g. `example.com`) |
+| `network` | query | yes | `"testnet"` or `"mainnet"` |
+| `address` | query | mainnet only | Caller's wallet address (must be in the allowlist for mainnet) |
+| `contact` | query | no | URL-encoded JSON registrant contact info (defaults to placeholder) |
 
-**Cost: $12.88 per request** (paid automatically via MPP/Tempo).
+**Supported TLDs:** `com`, `xyz`, `ai`, `io`, `net`, `cash`, `live`, `fyi`
+
+**Cost:** Dynamic — the server looks up the real USD price from the D3 registrar API. Payment is handled automatically via MPP/Tempo.
+
+### Registrant contact format
+
+The `contact` parameter is a URL-encoded JSON object. If omitted, defaults are used. The fields are for ICANN domain registration:
+
+```ts
+interface RegistrantContact {
+  firstName: string
+  lastName: string
+  organization: string
+  email: string
+  phone: string
+  phoneCountryCode: string  // e.g. "+1"
+  fax: string
+  faxCountryCode: string
+  street: string
+  city: string
+  state: string
+  postalCode: string
+  countryCode: string       // ISO 3166-1 alpha-2, e.g. "US"
+}
+```
 
 ### Example request
 
@@ -61,8 +87,29 @@ import { Mppx, tempo } from "mppx/client"
 const account = privateKeyToAccount("0x<PRIVATE_KEY>")
 Mppx.create({ methods: [tempo({ account })] })
 
-// Register a domain on testnet
-const response = await fetch("https://<HOST>/api/register/testnet?domain=example.com")
+const domain = "example.com"
+const network = "testnet"
+const address = account.address
+
+const contact = JSON.stringify({
+  firstName: "Jane",
+  lastName: "Smith",
+  organization: "Acme Inc",
+  email: "jane@acme.com",
+  phone: "4151234567",
+  phoneCountryCode: "+1",
+  fax: "4151234567",
+  faxCountryCode: "+1",
+  street: "123 Main St",
+  city: "San Francisco",
+  state: "CA",
+  postalCode: "94103",
+  countryCode: "US",
+})
+
+const url = `/api/register?domain=${encodeURIComponent(domain)}&network=${network}&address=${encodeURIComponent(address)}&contact=${encodeURIComponent(contact)}`
+
+const response = await fetch(url)
 const data = await response.json()
 console.log(data)
 ```
@@ -74,30 +121,39 @@ console.log(data)
   "success": true,
   "domain": "example.com",
   "network": "testnet",
-  "tokenId": "20719405654568256184282804044567699961418926341258048728655171573148113774124",
-  "contractAddress": "0x424bDf2E8a6F52Bd2c1C81D9437b0DC0309DF90f",
-  "expiresAt": "2027-03-17T00:00:00.000Z",
-  "url": "https://app-testnet.doma.xyz/domain/example.com",
-  "explorerUrl": "https://explorer-testnet.doma.xyz/token/0x424bDf2E8a6F52Bd2c1C81D9437b0DC0309DF90f/instance/20719405..."
+  "txHash": "0xabc123...",
+  "paymentContract": "0x9aC6761B5A1006E09C60a0BE10cd1C9d32911e96",
+  "voucherAmount": "29990000000000000000",
+  "order": {
+    "domain": "example.com",
+    "amount": "29.99",
+    "registrantContact": { ... },
+    "voucher": { ... },
+    "voucherSignature": "0x..."
+  }
 }
 ```
 
-For mainnet, URLs use `app.doma.xyz` and `explorer.doma.xyz` instead of the `-testnet` variants.
-
 ### Error responses
 
-- **400** — Invalid network (not `testnet` or `mainnet`) or missing `domain` query parameter
-- **402** — Payment required (handled automatically by `mppx`)
+| Status | Meaning |
+|--------|---------|
+| **400** | Invalid network, missing domain, domain missing TLD, unsupported TLD, or invalid order metadata |
+| **402** | Payment required (handled automatically by `mppx`) |
+| **403** | Mainnet registration not authorized for this address |
+| **409** | Domain not available for registration |
+| **500** | On-chain registration transaction failed |
 
 ## How the payment flow works under the hood
 
 You don't need to manage this yourself — `mppx` does it automatically — but for understanding:
 
-1. Client sends `GET /api/register/testnet?domain=example.com`
-2. Server returns **402 Payment Required** with a `WWW-Authenticate` header containing a payment challenge
-3. `mppx` extracts the challenge, signs a payment credential using the Tempo account
-4. `mppx` retries the request with an `Authorization` header containing the credential
-5. Server verifies payment and returns **200** with the registration result and a `Payment-Receipt` header
+1. Client sends `GET /api/register?domain=example.com&network=testnet`
+2. Server checks domain availability via the D3 Partner API and creates a payment order (voucher)
+3. Server returns **402 Payment Required** with a `WWW-Authenticate` header containing a payment challenge. The challenge includes HMAC-signed metadata (domain, amount, voucher) so the order survives the retry.
+4. `mppx` extracts the challenge, signs a payment credential using the Tempo account
+5. `mppx` retries the request with an `Authorization` header containing the credential
+6. Server reconstructs the order from the HMAC-verified challenge metadata, executes the on-chain payment contract (`pay()` function), waits for the transaction receipt, and returns the result
 
 ## Reading the payment receipt
 
@@ -106,7 +162,7 @@ After a successful request, you can inspect the payment receipt:
 ```ts
 import { Receipt } from "mppx"
 
-const response = await fetch("https://<HOST>/api/register/testnet?domain=example.com")
+const response = await fetch("/api/register?domain=example.com&network=testnet")
 const receipt = Receipt.fromResponse(response)
 
 console.log(receipt.status)    // "success"
@@ -119,15 +175,20 @@ console.log(receipt.timestamp) // payment timestamp
 | Constant | Value |
 |----------|-------|
 | PathUSD token (Tempo) | `0x20c0000000000000000000000000000000000000` |
-| Test recipient address | `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266` |
+| Tempo recipient address | `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266` |
 | Tempo testnet chain ID | `42431` |
-| Registration cost | $12.88 USD |
+| Doma testnet chain ID | `97476` |
+| Doma mainnet chain ID | `97477` |
+| Testnet payment contract | `0x9aC6761B5A1006E09C60a0BE10cd1C9d32911e96` |
+| Mainnet payment contract | `0xD000000000002C74F45Adc7b59d48dCE207eAcd2` |
+| D3 testnet API | `https://api-testnet.d3.app/` |
+| D3 mainnet API | `https://api-public.d3.app/` |
 
 ## CLI usage
 
 You can also test from the command line:
 
 ```bash
-npx mppx account create              # Create a Tempo account (auto-funded on testnet)
-npx mppx https://<HOST>/api/register/testnet?domain=example.com
+npx mppx account create    # Create a Tempo account (auto-funded on testnet)
+npx mppx "https://<HOST>/api/register?domain=example.com&network=testnet"
 ```
