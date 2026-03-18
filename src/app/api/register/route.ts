@@ -122,7 +122,7 @@ export async function GET(request: Request) {
   }
 
   // Initial request — check pricing and availability, issue 402
-  const availability = await getPricingAvailability(domain, registrantContact);
+  const availability = await getPricingAvailability(domain, registrantContact, network);
 
   if (!availability.available || !availability.order) {
     return Response.json(

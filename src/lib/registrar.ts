@@ -68,22 +68,55 @@ interface RegistrationResult {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function getD3Config(network: "testnet" | "mainnet") {
+  const apiUrl =
+    network === "mainnet"
+      ? process.env.DOMA_MAINNET_API_URL
+      : process.env.DOMA_TESTNET_API_URL;
+  const apiKey =
+    network === "mainnet"
+      ? process.env.DOMA_MAINNET_API_KEY
+      : process.env.DOMA_TESTNET_API_KEY;
+
+  if (!apiUrl || !apiKey) {
+    throw new Error(`Missing D3 API config for ${network}`);
+  }
+
+  return { apiUrl: apiUrl.replace(/\/+$/, ""), apiKey };
+}
+
 export async function getPricingAvailability(
   domain: string,
   registrantContact: RegistrantContact,
+  network: "testnet" | "mainnet",
 ): Promise<AvailabilityResult> {
-  // Simulate pricing lookup
-  await sleep(5000);
+  const dotIndex = domain.indexOf(".");
+  const sld = domain.slice(0, dotIndex);
+  const tld = domain.slice(dotIndex + 1);
 
-  // TODO: check real availability
-  // if (!available) return { available: false };
+  const { apiUrl, apiKey } = getD3Config(network);
 
-  // Random price between $5.01 and $25.99
-  const price = 5.01 + Math.random() * 20.98;
+  const searchUrl = `${apiUrl}/v1/partner/search?sld=${encodeURIComponent(sld)}&tld=${encodeURIComponent(tld)}&skip=0&limit=1`;
+  const res = await fetch(searchUrl, {
+    headers: { "Api-Key": apiKey },
+  });
+
+  if (!res.ok) {
+    throw new Error(`D3 search failed: ${res.status} ${res.statusText}`);
+  }
+
+  const data: { pageItems: Array<{ sld: string; tld: string; status: string; registryUsdPrice: string | null; usdPrice: string | null }> } = await res.json();
+  const match = data.pageItems.find((item) => item.sld === sld && item.tld === tld);
+
+  if (!match || match.status !== "available") {
+    return { available: false };
+  }
+
+  const price = match.registryUsdPrice ?? match.usdPrice ?? "0";
   const order: Order = {
     id: crypto.randomUUID(),
     domain,
-    amount: price.toFixed(2),
+    amount: price,
     registrantContact,
   };
 
