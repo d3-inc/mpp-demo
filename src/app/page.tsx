@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 
-import { Loader2, ChevronRight, CircleCheck, Globe, Info, ExternalLink } from "lucide-react";
+import { Loader2, ChevronRight, CircleCheck, Globe, Info, ExternalLink, Gem } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -562,7 +562,7 @@ export default function Home() {
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-1.5 text-sm text-primary underline">
-                      <Globe className="h-4 w-4 shrink-0" />
+                      <Gem className="h-4 w-4 shrink-0" />
                       View on Doma
                       <ExternalLink className="h-3 w-3 shrink-0" />
                     </a>
@@ -577,6 +577,15 @@ export default function Home() {
                         <ExternalLink className="h-3 w-3 shrink-0" />
                       </a>
                     )}
+                    <a
+                      href={`https://${registeredDomain}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground underline">
+                      <Globe className="h-4 w-4 shrink-0" />
+                      Visit Domain
+                      <ExternalLink className="h-3 w-3 shrink-0" />
+                    </a>
                   </div>
                   <div className="rounded-lg border bg-muted/50 p-4">
                     <pre className="font-mono text-sm text-muted-foreground whitespace-pre-wrap break-all">
