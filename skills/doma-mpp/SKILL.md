@@ -18,13 +18,13 @@ npm install mppx viem
 Create an account from a private key:
 
 ```ts
-import { privateKeyToAccount } from "viem/accounts"
-import { Mppx, tempo } from "mppx/client"
+import { privateKeyToAccount } from "viem/accounts";
+import { Mppx, tempo } from "mppx/client";
 
-const account = privateKeyToAccount("0x<PRIVATE_KEY>")
+const account = privateKeyToAccount("0x<PRIVATE_KEY>");
 
 // This polyfills global fetch to auto-handle 402 payment challenges
-Mppx.create({ methods: [tempo({ account })] })
+Mppx.create({ methods: [tempo({ account })] });
 ```
 
 If you prefer not to polyfill global fetch:
@@ -33,10 +33,10 @@ If you prefer not to polyfill global fetch:
 const mppx = Mppx.create({
   polyfill: false,
   methods: [tempo({ account })],
-})
+});
 
 // Use mppx.fetch instead of global fetch
-const response = await mppx.fetch(url)
+const response = await mppx.fetch(url);
 ```
 
 ## The /register endpoint
@@ -45,12 +45,12 @@ const response = await mppx.fetch(url)
 GET /api/register?domain={domain}&network={network}&address={address}&contact={contact}
 ```
 
-| Parameter | Location | Required | Description |
-|-----------|----------|----------|-------------|
-| `domain` | query | yes | Full domain including TLD (e.g. `example.com`) |
-| `network` | query | yes | `"testnet"` or `"mainnet"` |
-| `address` | query | yes | Caller's wallet address (domain is tokenized to this wallet) |
-| `contact` | query | no | URL-encoded JSON registrant contact info (defaults to placeholder) |
+| Parameter | Location | Required | Description                                                                |
+| --------- | -------- | -------- | -------------------------------------------------------------------------- |
+| `domain`  | query    | yes      | Full domain including TLD (e.g. `example.com`)                             |
+| `network` | query    | yes      | `"testnet"` or `"mainnet"`                                                 |
+| `address` | query    | yes      | Caller's wallet address (domain is tokenized to this wallet)               |
+| `contact` | query    | yes      | URL-encoded JSON registrant contact info (at minimum must include `email`) |
 
 **Supported TLDs:** `com`, `xyz`, `ai`, `io`, `net`, `cash`, `live`, `fyi`
 
@@ -58,38 +58,38 @@ GET /api/register?domain={domain}&network={network}&address={address}&contact={c
 
 ### Registrant contact format
 
-The `contact` parameter is a URL-encoded JSON object. If omitted, defaults are used. The fields are for ICANN domain registration:
+The `contact` parameter is a URL-encoded JSON object. At minimum, you must provide an `email`. Other fields default to placeholder values. The fields are for ICANN domain registration:
 
 ```ts
 interface RegistrantContact {
-  firstName: string
-  lastName: string
-  organization: string
-  email: string
-  phone: string
-  phoneCountryCode: string  // e.g. "+1"
-  fax: string
-  faxCountryCode: string
-  street: string
-  city: string
-  state: string
-  postalCode: string
-  countryCode: string       // ISO 3166-1 alpha-2, e.g. "US"
+  firstName: string;
+  lastName: string;
+  organization: string;
+  email: string;
+  phone: string;
+  phoneCountryCode: string; // e.g. "+1"
+  fax: string;
+  faxCountryCode: string;
+  street: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  countryCode: string; // ISO 3166-1 alpha-2, e.g. "US"
 }
 ```
 
 ### Example request
 
 ```ts
-import { privateKeyToAccount } from "viem/accounts"
-import { Mppx, tempo } from "mppx/client"
+import { privateKeyToAccount } from "viem/accounts";
+import { Mppx, tempo } from "mppx/client";
 
-const account = privateKeyToAccount("0x<PRIVATE_KEY>")
-Mppx.create({ methods: [tempo({ account })] })
+const account = privateKeyToAccount("0x<PRIVATE_KEY>");
+Mppx.create({ methods: [tempo({ account })] });
 
-const domain = "example.com"
-const network = "testnet"
-const address = account.address
+const domain = "example.com";
+const network = "testnet";
+const address = account.address;
 
 const contact = JSON.stringify({
   firstName: "Jane",
@@ -105,13 +105,13 @@ const contact = JSON.stringify({
   state: "CA",
   postalCode: "94103",
   countryCode: "US",
-})
+});
 
-const url = `/api/register?domain=${encodeURIComponent(domain)}&network=${network}&address=${encodeURIComponent(address)}&contact=${encodeURIComponent(contact)}`
+const url = `https://mpp-demo.doma.xyz/api/register?domain=${encodeURIComponent(domain)}&network=${network}&address=${encodeURIComponent(address)}&contact=${encodeURIComponent(contact)}`;
 
-const response = await fetch(url)
-const data = await response.json()
-console.log(data)
+const response = await fetch(url);
+const data = await response.json();
+console.log(data);
 ```
 
 ### Success response (200)
@@ -136,18 +136,18 @@ console.log(data)
 
 ### Error responses
 
-| Status | Meaning |
-|--------|---------|
+| Status  | Meaning                                                                                                          |
+| ------- | ---------------------------------------------------------------------------------------------------------------- |
 | **400** | Invalid network, missing domain, missing address, domain missing TLD, unsupported TLD, or invalid order metadata |
-| **402** | Payment required (handled automatically by `mppx`) |
-| **409** | Domain not available for registration |
-| **500** | On-chain registration transaction failed |
+| **402** | Payment required (handled automatically by `mppx`)                                                               |
+| **409** | Domain not available for registration                                                                            |
+| **500** | On-chain registration transaction failed                                                                         |
 
 ## How the payment flow works under the hood
 
 You don't need to manage this yourself — `mppx` does it automatically — but for understanding:
 
-1. Client sends `GET /api/register?domain=example.com&network=testnet`
+1. Client sends `GET https://mpp-demo.doma.xyz/api/register?domain=example.com&network=testnet`
 2. Server checks domain availability via the D3 Partner API and creates a payment order (voucher)
 3. Server returns **402 Payment Required** with a `WWW-Authenticate` header containing a payment challenge. The challenge includes HMAC-signed metadata (domain, amount, voucher) so the order survives the retry.
 4. `mppx` extracts the challenge, signs a payment credential using the Tempo account
@@ -159,30 +159,32 @@ You don't need to manage this yourself — `mppx` does it automatically — but 
 After a successful request, you can inspect the payment receipt:
 
 ```ts
-import { Receipt } from "mppx"
+import { Receipt } from "mppx";
 
-const response = await fetch("/api/register?domain=example.com&network=testnet")
-const receipt = Receipt.fromResponse(response)
+const response = await fetch(
+  "https://mpp-demo.doma.xyz/api/register?domain=example.com&network=testnet",
+);
+const receipt = Receipt.fromResponse(response);
 
-console.log(receipt.status)    // "success"
-console.log(receipt.reference) // transaction hash
-console.log(receipt.timestamp) // payment timestamp
+console.log(receipt.status); // "success"
+console.log(receipt.reference); // transaction hash
+console.log(receipt.timestamp); // payment timestamp
 ```
 
 ## Key constants
 
-| Constant | Value |
-|----------|-------|
-| PathUSD token (testnet) | `0x20c0000000000000000000000000000000000000` |
-| USDC token (mainnet) | `0x20C000000000000000000000b9537d11c60E8b50` |
-| Tempo recipient address | `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266` |
-| Tempo testnet chain ID | `42431` |
-| Doma testnet chain ID | `97476` |
-| Doma mainnet chain ID | `97477` |
+| Constant                 | Value                                        |
+| ------------------------ | -------------------------------------------- |
+| PathUSD token (testnet)  | `0x20c0000000000000000000000000000000000000` |
+| USDC token (mainnet)     | `0x20C000000000000000000000b9537d11c60E8b50` |
+| Tempo recipient address  | `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266` |
+| Tempo testnet chain ID   | `42431`                                      |
+| Doma testnet chain ID    | `97476`                                      |
+| Doma mainnet chain ID    | `97477`                                      |
 | Testnet payment contract | `0x9aC6761B5A1006E09C60a0BE10cd1C9d32911e96` |
 | Mainnet payment contract | `0xD000000000002C74F45Adc7b59d48dCE207eAcd2` |
-| D3 testnet API | `https://api-testnet.d3.app/` |
-| D3 mainnet API | `https://api-public.d3.app/` |
+| D3 testnet API           | `https://api-testnet.d3.app/`                |
+| D3 mainnet API           | `https://api-public.d3.app/`                 |
 
 ## CLI usage
 
@@ -190,5 +192,26 @@ You can also test from the command line:
 
 ```bash
 npx mppx account create    # Create a Tempo account (auto-funded on testnet)
-npx mppx "https://<HOST>/api/register?domain=example.com&network=testnet"
+npx mppx "https://mpp-demo.doma.xyz/api/register?domain=example.com&network=testnet"
 ```
+
+### Mainnet CLI usage
+
+The `mppx` CLI defaults to the Tempo **testnet** chain when no RPC URL is provided. For mainnet requests, you **must** specify the mainnet RPC — otherwise the CLI will connect to testnet and fail with `TIP20 token error: Uninitialized` because the mainnet USDC token doesn't exist on testnet.
+
+Use the `-r` flag or the `RPC_URL` environment variable:
+
+```bash
+# Using -r flag
+npx mppx --account main -r https://rpc.tempo.xyz "https://mpp-demo.doma.xyz/api/register?domain=example.com&network=mainnet&address=0x...&contact=..."
+
+# Using environment variable
+RPC_URL=https://rpc.tempo.xyz npx mppx --account main "https://mpp-demo.doma.xyz/api/register?domain=example.com&network=mainnet&address=0x...&contact=..."
+```
+
+| Network | RPC URL                          |
+| ------- | -------------------------------- |
+| Mainnet | `https://rpc.tempo.xyz`          |
+| Testnet | `https://rpc.moderato.tempo.xyz` |
+
+Note: The server's 402 challenge does include the correct `chainId` (4217 for mainnet), but the CLI currently ignores it and relies solely on the RPC URL to determine the chain.
