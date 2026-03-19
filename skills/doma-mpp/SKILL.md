@@ -49,7 +49,7 @@ GET /api/register?domain={domain}&network={network}&address={address}&contact={c
 |-----------|----------|----------|-------------|
 | `domain` | query | yes | Full domain including TLD (e.g. `example.com`) |
 | `network` | query | yes | `"testnet"` or `"mainnet"` |
-| `address` | query | mainnet only | Caller's wallet address (must be in the allowlist for mainnet) |
+| `address` | query | yes | Caller's wallet address (domain is tokenized to this wallet) |
 | `contact` | query | no | URL-encoded JSON registrant contact info (defaults to placeholder) |
 
 **Supported TLDs:** `com`, `xyz`, `ai`, `io`, `net`, `cash`, `live`, `fyi`
@@ -138,9 +138,8 @@ console.log(data)
 
 | Status | Meaning |
 |--------|---------|
-| **400** | Invalid network, missing domain, domain missing TLD, unsupported TLD, or invalid order metadata |
+| **400** | Invalid network, missing domain, missing address, domain missing TLD, unsupported TLD, or invalid order metadata |
 | **402** | Payment required (handled automatically by `mppx`) |
-| **403** | Mainnet registration not authorized for this address |
 | **409** | Domain not available for registration |
 | **500** | On-chain registration transaction failed |
 
