@@ -113,14 +113,16 @@ export async function GET(request: Request) {
     );
   }
 
-  const funderAddress =
-    network === "mainnet"
-      ? process.env.DOMA_MAINNET_FUNDER_ADDRESS!
-      : process.env.DOMA_TESTNET_FUNDER_ADDRESS!;
+  // Use the MPP payer's address as the domain owner (tokenized to this wallet).
+  // The funder wallet pays on-chain, but the buyer address determines ownership.
+  const ownerAddress = url.searchParams.get("address");
+  if (!ownerAddress) {
+    return Response.json({ error: "Missing 'address' query parameter." }, { status: 400 });
+  }
 
   let d3Order;
   try {
-    d3Order = await createD3Order(sld, tld, funderAddress, registrantContact, network);
+    d3Order = await createD3Order(sld, tld, ownerAddress, registrantContact, network);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return Response.json(
