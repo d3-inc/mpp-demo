@@ -10,11 +10,17 @@ import {
   type RegistrantContact,
 } from "@/lib/registrar";
 
+// PathUSD on testnet, USDC on mainnet
+const TEMPO_CURRENCY = {
+  testnet: "0x20c0000000000000000000000000000000000000",
+  mainnet: "0x20C000000000000000000000b9537d11c60E8b50",
+} as const;
+
 function createMppx(testnet: boolean) {
   return Mppx.create({
     methods: [
       tempo({
-        currency: "0x20c0000000000000000000000000000000000000",
+        currency: TEMPO_CURRENCY[testnet ? "testnet" : "mainnet"],
         recipient: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
         testnet,
       }),
