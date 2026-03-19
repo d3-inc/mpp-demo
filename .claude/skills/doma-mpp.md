@@ -1,0 +1,1 @@
+../../skills/doma-mpp/SKILL.md
