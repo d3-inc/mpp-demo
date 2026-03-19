@@ -177,7 +177,7 @@ console.log(receipt.timestamp); // payment timestamp
 | ------------------------ | -------------------------------------------- |
 | PathUSD token (testnet)  | `0x20c0000000000000000000000000000000000000` |
 | USDC token (mainnet)     | `0x20C000000000000000000000b9537d11c60E8b50` |
-| Tempo recipient address  | `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266` |
+| Tempo recipient address  | `0x17ae28d21f80a1082eE3C54AcB03769B09d42DA8` |
 | Tempo testnet chain ID   | `42431`                                      |
 | Doma testnet chain ID    | `97476`                                      |
 | Doma mainnet chain ID    | `97477`                                      |

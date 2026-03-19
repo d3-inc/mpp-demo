@@ -21,7 +21,7 @@ function createMppx(testnet: boolean) {
     methods: [
       tempo({
         currency: TEMPO_CURRENCY[testnet ? "testnet" : "mainnet"],
-        recipient: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        recipient: "0x17ae28d21f80a1082eE3C54AcB03769B09d42DA8",
         testnet,
       }),
     ],
