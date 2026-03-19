@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef } from "react";
 import { createWalletClient, createPublicClient, http, formatUnits } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { tempoModerato } from "viem/chains";
+import { tempo as tempoMainnet, tempoModerato } from "viem/chains";
 import { Mppx, tempo } from "mppx/client";
 import { Credential } from "mppx";
 
@@ -32,7 +32,7 @@ export interface ClientInfo {
   };
 }
 
-export function useMppClient(privateKey: string) {
+export function useMppClient(privateKey: string, network: "testnet" | "mainnet") {
   const [accountAddress, setAccountAddress] = useState("");
   const [isInitialized, setIsInitialized] = useState(false);
   const [loadingId, setLoadingId] = useState<string | null>(null);
@@ -116,14 +116,16 @@ export function useMppClient(privateKey: string) {
         return response;
       };
 
+      const chain = network === "mainnet" ? tempoMainnet : tempoModerato;
+
       const walletClient = createWalletClient({
         account,
-        chain: tempoModerato,
+        chain,
         transport: http(),
       });
 
       const publicClient = createPublicClient({
-        chain: tempoModerato,
+        chain,
         transport: http(),
       });
 
@@ -179,14 +181,14 @@ export function useMppClient(privateKey: string) {
       setAccountAddress(account.address);
       setClientInfo({
         chain: {
-          name: tempoModerato.name,
-          id: tempoModerato.id,
-          nativeCurrency: tempoModerato.nativeCurrency,
-          rpcUrl: tempoModerato.rpcUrls.default.http[0],
+          name: chain.name,
+          id: chain.id,
+          nativeCurrency: chain.nativeCurrency,
+          rpcUrl: chain.rpcUrls.default.http[0],
         },
         account: {
           address: account.address,
-          balance: `${formatUnits(balance, tempoModerato.nativeCurrency.decimals)} ${tempoModerato.nativeCurrency.symbol}`,
+          balance: `${formatUnits(balance, chain.nativeCurrency.decimals)} ${chain.nativeCurrency.symbol}`,
         },
         tempo: {
           account: account.address,
@@ -200,7 +202,7 @@ export function useMppClient(privateKey: string) {
     } catch (error) {
       alert(`Error initializing client: ${error}`);
     }
-  }, [privateKey, addTrace]);
+  }, [privateKey, network, addTrace]);
 
   const makeRequest = useCallback(
     async (id: string, url: string) => {

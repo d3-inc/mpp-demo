@@ -10,22 +10,17 @@ import {
   type RegistrantContact,
 } from "@/lib/registrar";
 
-const ALLOWED_MAINNET_ADDRESSES = new Set(
-  (process.env.ALLOWED_DOMA_MAINNET_ADDRESSES || "")
-    .split(",")
-    .map((a) => a.trim().toLowerCase())
-    .filter(Boolean),
-);
-
-const mppx = Mppx.create({
-  methods: [
-    tempo({
-      currency: "0x20c0000000000000000000000000000000000000",
-      recipient: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-      testnet: true,
-    }),
-  ],
-});
+function createMppx(testnet: boolean) {
+  return Mppx.create({
+    methods: [
+      tempo({
+        currency: "0x20c0000000000000000000000000000000000000",
+        recipient: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        testnet,
+      }),
+    ],
+  });
+}
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -38,6 +33,8 @@ export async function GET(request: Request) {
       { status: 400 },
     );
   }
+
+  const mppx = createMppx(network === "testnet");
 
   const domain = url.searchParams.get("domain");
 
@@ -61,17 +58,6 @@ export async function GET(request: Request) {
     );
   }
 
-  // Restrict mainnet to allowed addresses (check early, before payment)
-  if (network === "mainnet") {
-    const address = url.searchParams.get("address")?.toLowerCase();
-    if (!address || !ALLOWED_MAINNET_ADDRESSES.has(address)) {
-      return Response.json(
-        { error: "This account is not authorized for mainnet registration." },
-        { status: 403 },
-      );
-    }
-  }
-
   // Parse registrant contact from query param, fall back to defaults
   let registrantContact: RegistrantContact = DEFAULT_CONTACT;
   const contactParam = url.searchParams.get("contact");
@@ -92,17 +78,6 @@ export async function GET(request: Request) {
 
     if (!meta?.domain || !meta?.amount || !meta?.voucher) {
       return Response.json({ error: "Invalid or missing order metadata." }, { status: 400 });
-    }
-
-    // Verified mainnet check — credential.source is cryptographically bound to the payer's key
-    if (network === "mainnet") {
-      const payerAddress = credential.source?.split(":").pop()?.toLowerCase();
-      if (!payerAddress || !ALLOWED_MAINNET_ADDRESSES.has(payerAddress)) {
-        return Response.json(
-          { error: "This account is not authorized for mainnet registration." },
-          { status: 403 },
-        );
-      }
     }
 
     const order = orderFromMeta(meta, registrantContact);

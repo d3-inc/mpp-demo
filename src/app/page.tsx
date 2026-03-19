@@ -22,10 +22,8 @@ import { MppLogo } from "@/components/MppLogo";
 import { useMppClient } from "@/hooks/useMppClient";
 import { useTokenStatus } from "@/hooks/useTokenStatus";
 
-const DEFAULT_PRIVATE_KEY = process.env.NEXT_PUBLIC_TESTNET_TEMPO_KEY_1 || "";
-
 export default function Home() {
-  const [privateKey, setPrivateKey] = useState(DEFAULT_PRIVATE_KEY);
+  const [privateKey, setPrivateKey] = useState("");
   const [domainName, setDomainName] = useState("");
   const [domainTld, setDomainTld] = useState("com");
   const [network, setNetwork] = useState<"testnet" | "mainnet">("testnet");
@@ -42,7 +40,7 @@ export default function Home() {
     initializeClient,
     makeRequest,
     resetInitialized,
-  } = useMppClient(privateKey);
+  } = useMppClient(privateKey, network);
 
   // Derive registered domain from trace
   const registeredDomain = useMemo(() => {
@@ -120,6 +118,28 @@ export default function Home() {
                 placeholder="0x..."
                 className="font-mono"
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Network</Label>
+              <Select
+                value={network}
+                onValueChange={(v) => {
+                  if (v) {
+                    setNetwork(v as "testnet" | "mainnet");
+                    resetInitialized();
+                  }
+                }}>
+                <SelectTrigger className="w-full">
+                  <SelectValue>
+                    {network === "testnet" ? "TESTNET" : "MAINNET"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="testnet">TESTNET</SelectItem>
+                  <SelectItem value="mainnet">MAINNET</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <Button
@@ -211,7 +231,7 @@ export default function Home() {
                       </p>
                     </div>
                     <Button
-                      onClick={() => makeRequest("ping-local", "/api/test-paid")}
+                      onClick={() => makeRequest("ping-local", `/api/test-paid?network=${network}`)}
                       disabled={!isInitialized || !!loadingId}
                       className="shrink-0">
                       {loadingId === "ping-local" ? (
@@ -233,7 +253,7 @@ export default function Home() {
                     </div>
                     <Button
                       onClick={() =>
-                        makeRequest("ping-insufficient", "/api/test-insufficient-funds")
+                        makeRequest("ping-insufficient", `/api/test-insufficient-funds?network=${network}`)
                       }
                       disabled={!isInitialized || !!loadingId}
                       className="shrink-0">
@@ -261,48 +281,30 @@ export default function Home() {
                   <p className="text-sm text-muted-foreground mt-1">Register a domain on DOMA</p>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-3">
-                  <div className="space-y-1.5 sm:col-span-2">
-                    <Label>DOMA Network</Label>
-                    <Select
-                      value={network}
-                      onValueChange={(v) => v && setNetwork(v as "testnet" | "mainnet")}>
-                      <SelectTrigger className="w-full">
+                <div className="space-y-1.5 mb-3">
+                  <Label>Domain</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      type="text"
+                      value={domainName}
+                      onChange={(e) => setDomainName(e.target.value)}
+                      placeholder="example"
+                      className="flex-1 font-mono"
+                    />
+                    <Select value={domainTld} onValueChange={(v) => v && setDomainTld(v)}>
+                      <SelectTrigger className="font-mono">
                         <SelectValue>
-                          {network === "testnet" ? "TESTNET" : "MAINNET"}
+                          .{domainTld}
                         </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="testnet">TESTNET</SelectItem>
-                        <SelectItem value="mainnet">MAINNET</SelectItem>
+                        {SUPPORTED_TLDS.map((tld) => (
+                          <SelectItem key={tld} value={tld}>
+                            .{tld}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
-                  </div>
-                  <div className="space-y-1.5 sm:col-span-2">
-                    <Label>Domain</Label>
-                    <div className="flex gap-2">
-                      <Input
-                        type="text"
-                        value={domainName}
-                        onChange={(e) => setDomainName(e.target.value)}
-                        placeholder="example"
-                        className="flex-1 font-mono"
-                      />
-                      <Select value={domainTld} onValueChange={(v) => v && setDomainTld(v)}>
-                        <SelectTrigger className="font-mono">
-                          <SelectValue>
-                            .{domainTld}
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {SUPPORTED_TLDS.map((tld) => (
-                            <SelectItem key={tld} value={tld}>
-                              .{tld}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
                   </div>
                 </div>
 
