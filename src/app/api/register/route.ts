@@ -16,12 +16,16 @@ const TEMPO_CURRENCY = {
   mainnet: "0x20C000000000000000000000b9537d11c60E8b50",
 } as const;
 
-function createMppx(testnet: boolean) {
+function isAddressEnv(s: string): s is `0x${string}` {
+  return /^0x[a-fA-F0-9]{40}$/.test(s);
+}
+
+function createMppx(testnet: boolean, recipient: `0x${string}`) {
   return Mppx.create({
     methods: [
       tempo({
         currency: TEMPO_CURRENCY[testnet ? "testnet" : "mainnet"],
-        recipient: "0x17ae28d21f80a1082eE3C54AcB03769B09d42DA8",
+        recipient,
         testnet,
       }),
     ],
@@ -40,7 +44,18 @@ export async function GET(request: Request) {
     );
   }
 
-  const mppx = createMppx(network === "testnet");
+  const tempoRecipient = process.env.TEMPO_RECIPIENT_ADDRESS ?? "";
+  if (!isAddressEnv(tempoRecipient)) {
+    return Response.json(
+      {
+        error:
+          "Server misconfiguration: TEMPO_RECIPIENT_ADDRESS must be set to a valid 0x-prefixed address.",
+      },
+      { status: 500 },
+    );
+  }
+
+  const mppx = createMppx(network === "testnet", tempoRecipient);
 
   const domain = url.searchParams.get("domain");
 
@@ -131,10 +146,7 @@ export async function GET(request: Request) {
     d3Order = await createD3Order(sld, tld, ownerAddress, registrantContact, network);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return Response.json(
-      { error: message },
-      { status: 409 },
-    );
+    return Response.json({ error: message }, { status: 409 });
   }
 
   const { voucher, signature } = d3Order;

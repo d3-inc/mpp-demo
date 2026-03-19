@@ -1,13 +1,4 @@
-export const SUPPORTED_TLDS = [
-  "com",
-  "xyz",
-  "ai",
-  "io",
-  "net",
-  "cash",
-  "live",
-  "fyi",
-] as const;
+export const SUPPORTED_TLDS = ["com", "xyz", "ai", "io", "net", "cash", "live", "fyi"] as const;
 
 export interface RegistrantContact {
   firstName: string;
@@ -60,13 +51,9 @@ interface RegistrationResult {
 
 function getD3Config(network: "testnet" | "mainnet") {
   const apiUrl =
-    network === "mainnet"
-      ? process.env.DOMA_MAINNET_API_URL
-      : process.env.DOMA_TESTNET_API_URL;
+    network === "mainnet" ? process.env.DOMA_MAINNET_API_URL : process.env.DOMA_TESTNET_API_URL;
   const apiKey =
-    network === "mainnet"
-      ? process.env.DOMA_MAINNET_API_KEY
-      : process.env.DOMA_TESTNET_API_KEY;
+    network === "mainnet" ? process.env.DOMA_MAINNET_API_KEY : process.env.DOMA_TESTNET_API_KEY;
 
   if (!apiUrl || !apiKey) {
     throw new Error(`Missing D3 API config for ${network}`);
@@ -87,7 +74,15 @@ export async function searchAvailability(
     { headers: { "Api-Key": apiKey } },
   );
   if (!res.ok) throw new Error(`D3 search failed: ${res.status}`);
-  const data: { pageItems: Array<{ sld: string; tld: string; status: string; registryUsdPrice: string | null; usdPrice: string | null }> } = await res.json();
+  const data: {
+    pageItems: Array<{
+      sld: string;
+      tld: string;
+      status: string;
+      registryUsdPrice: string | null;
+      usdPrice: string | null;
+    }>;
+  } = await res.json();
   const match = data.pageItems.find((item) => item.sld === sld && item.tld === tld);
   if (!match || match.status !== "available") return { available: false, usdPrice: null };
   return { available: true, usdPrice: match.registryUsdPrice ?? match.usdPrice };
@@ -218,8 +213,8 @@ export async function processRegistration(
       : process.env.DOMA_TESTNET_PAYMENT_CONTRACT;
   const funderKey =
     network === "mainnet"
-      ? process.env.DOMA_MAINNET_FUNDER_KEY
-      : process.env.DOMA_TESTNET_FUNDER_KEY;
+      ? process.env.DOMA_MAINNET_FUNDER_PRIVATE_KEY
+      : process.env.DOMA_TESTNET_FUNDER_PRIVATE_KEY;
 
   if (!paymentContract || !funderKey) {
     throw new Error(`Missing payment config for ${network}`);
