@@ -1,5 +1,6 @@
 import { Mppx, tempo } from "mppx/nextjs";
 import { Credential, Challenge } from "mppx";
+import { privateKeyToAccount } from "viem/accounts";
 import {
   SUPPORTED_TLDS,
   searchAvailability,
@@ -16,12 +17,16 @@ const TEMPO_CURRENCY = {
   mainnet: "0x20C000000000000000000000b9537d11c60E8b50",
 } as const;
 
-function createMppx(testnet: boolean) {
+function isAddressEnv(s: string): s is `0x${string}` {
+  return /^0x[a-fA-F0-9]{40}$/.test(s);
+}
+
+function createMppx(testnet: boolean, recipient: `0x${string}`) {
   return Mppx.create({
     methods: [
       tempo({
         currency: TEMPO_CURRENCY[testnet ? "testnet" : "mainnet"],
-        recipient: "0x17ae28d21f80a1082eE3C54AcB03769B09d42DA8",
+        recipient,
         testnet,
       }),
     ],
@@ -40,7 +45,18 @@ export async function GET(request: Request) {
     );
   }
 
-  const mppx = createMppx(network === "testnet");
+  const tempoRecipient = process.env.TEMPO_RECIPIENT_ADDRESS ?? "";
+  if (!isAddressEnv(tempoRecipient)) {
+    return Response.json(
+      {
+        error:
+          "Server misconfiguration: TEMPO_RECIPIENT_ADDRESS must be set to a valid 0x-prefixed address.",
+      },
+      { status: 500 },
+    );
+  }
+
+  const mppx = createMppx(network === "testnet", tempoRecipient);
 
   const domain = url.searchParams.get("domain");
 
@@ -110,6 +126,21 @@ export async function GET(request: Request) {
     return handler(request);
   }
 
+  // Mainnet: only allow whitelisted payer addresses (checked before 402 so no money is taken)
+  if (network === "mainnet") {
+    const allowed = (process.env.ALLOWED_DOMA_MAINNET_ADDRESSES ?? "")
+      .split(",")
+      .map((a) => a.trim().toLowerCase())
+      .filter(Boolean);
+    const callerAddress = (url.searchParams.get("address") ?? "").toLowerCase();
+    if (allowed.length > 0 && !allowed.includes(callerAddress)) {
+      return Response.json(
+        { error: "Payer address is not authorized for mainnet registration." },
+        { status: 403 },
+      );
+    }
+  }
+
   // Initial request — check availability + USD price, create ETH order for voucher, issue 402
   const search = await searchAvailability(sld, tld, network);
   if (!search.available || !search.usdPrice) {
@@ -119,22 +150,22 @@ export async function GET(request: Request) {
     );
   }
 
-  // Use the MPP payer's address as the domain owner (tokenized to this wallet).
-  // The funder wallet pays on-chain, but the buyer address determines ownership.
-  const ownerAddress = url.searchParams.get("address");
-  if (!ownerAddress) {
-    return Response.json({ error: "Missing 'address' query parameter." }, { status: 400 });
+  // Use the funder wallet as the buyer so msg.sender matches voucher.buyer on-chain.
+  const funderKey =
+    network === "mainnet"
+      ? process.env.DOMA_MAINNET_FUNDER_PRIVATE_KEY
+      : process.env.DOMA_TESTNET_FUNDER_PRIVATE_KEY;
+  if (!funderKey) {
+    return Response.json({ error: `Missing funder key for ${network}` }, { status: 500 });
   }
+  const funderAddress = privateKeyToAccount(funderKey as `0x${string}`).address;
 
   let d3Order;
   try {
-    d3Order = await createD3Order(sld, tld, ownerAddress, registrantContact, network);
+    d3Order = await createD3Order(sld, tld, funderAddress, registrantContact, network);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return Response.json(
-      { error: message },
-      { status: 409 },
-    );
+    return Response.json({ error: message }, { status: 409 });
   }
 
   const { voucher, signature } = d3Order;

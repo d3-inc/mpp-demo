@@ -1,17 +1,16 @@
 import { config } from "dotenv";
+import { SUPPORTED_TLDS, DEFAULT_CONTACT, getD3PaymentOptions } from "../src/lib/registrar";
 config({ path: ".env.local" });
-import {
-  SUPPORTED_TLDS,
-  DEFAULT_CONTACT,
-  getD3PaymentOptions,
-} from "../src/lib/registrar";
 
 const NETWORK = "testnet" as const;
 const FUNDER_ADDRESS = process.env.DOMA_TESTNET_FUNDER_ADDRESS!;
 
 function randomSld() {
   const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-  const suffix = Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+  const suffix = Array.from(
+    { length: 6 },
+    () => chars[Math.floor(Math.random() * chars.length)],
+  ).join("");
   return `doma-testquote-${suffix}`;
 }
 
@@ -35,9 +34,12 @@ async function main() {
 
   // 1. Search
   console.log("1. D3 search...");
-  const searchRes = await fetch(`${apiUrl}/v1/partner/search?sld=${sld}&tld=${tld}&skip=0&limit=1`, {
-    headers: { "Api-Key": apiKey },
-  });
+  const searchRes = await fetch(
+    `${apiUrl}/v1/partner/search?sld=${sld}&tld=${tld}&skip=0&limit=1`,
+    {
+      headers: { "Api-Key": apiKey },
+    },
+  );
   const searchData = await searchRes.json();
   const match = searchData.pageItems?.[0];
 

@@ -45,12 +45,12 @@ const response = await mppx.fetch(url);
 GET /api/register?domain={domain}&network={network}&address={address}&contact={contact}
 ```
 
-| Parameter | Location | Required | Description                                                                |
-| --------- | -------- | -------- | -------------------------------------------------------------------------- |
-| `domain`  | query    | yes      | Full domain including TLD (e.g. `example.com`)                             |
-| `network` | query    | yes      | `"testnet"` or `"mainnet"`                                                 |
-| `address` | query    | yes      | Caller's wallet address (domain is tokenized to this wallet)               |
-| `contact` | query    | yes      | URL-encoded JSON registrant contact info (at minimum must include `email`) |
+| Parameter | Location | Required | Description                                                                                    |
+| --------- | -------- | -------- | ---------------------------------------------------------------------------------------------- |
+| `domain`  | query    | yes      | Full domain including TLD (e.g. `example.com`)                                                 |
+| `network` | query    | yes      | `"testnet"` or `"mainnet"`                                                                     |
+| `address` | query    | yes      | Caller's wallet address (used for mainnet allowlist check via `ALLOWED_DOMA_MAINNET_ADDRESSES`) |
+| `contact` | query    | yes      | URL-encoded JSON registrant contact info (at minimum must include `email`)                      |
 
 **Supported TLDs:** `com`, `xyz`, `ai`, `io`, `net`, `cash`, `live`, `fyi`
 
@@ -138,8 +138,9 @@ console.log(data);
 
 | Status  | Meaning                                                                                                          |
 | ------- | ---------------------------------------------------------------------------------------------------------------- |
-| **400** | Invalid network, missing domain, missing address, domain missing TLD, unsupported TLD, or invalid order metadata |
+| **400** | Invalid network, missing domain, domain missing TLD, unsupported TLD, or invalid order metadata |
 | **402** | Payment required (handled automatically by `mppx`)                                                               |
+| **403** | Payer address not in mainnet allowlist (`ALLOWED_DOMA_MAINNET_ADDRESSES`)                                         |
 | **409** | Domain not available for registration                                                                            |
 | **500** | On-chain registration transaction failed                                                                         |
 

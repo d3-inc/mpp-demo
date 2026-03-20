@@ -9,9 +9,7 @@ export async function GET(request: Request) {
   }
 
   const apiUrl =
-    network === "mainnet"
-      ? process.env.DOMA_MAINNET_API_URL
-      : process.env.DOMA_TESTNET_API_URL;
+    network === "mainnet" ? process.env.DOMA_MAINNET_API_URL : process.env.DOMA_TESTNET_API_URL;
   const apiKey =
     network === "mainnet"
       ? process.env.DOMA_MAINNET_API_KEY
