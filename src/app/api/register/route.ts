@@ -1,5 +1,6 @@
 import { Mppx, tempo } from "mppx/nextjs";
 import { Credential, Challenge } from "mppx";
+import { privateKeyToAccount } from "viem/accounts";
 import {
   SUPPORTED_TLDS,
   searchAvailability,
@@ -134,16 +135,19 @@ export async function GET(request: Request) {
     );
   }
 
-  // Use the MPP payer's address as the domain owner (tokenized to this wallet).
-  // The funder wallet pays on-chain, but the buyer address determines ownership.
-  const ownerAddress = url.searchParams.get("address");
-  if (!ownerAddress) {
-    return Response.json({ error: "Missing 'address' query parameter." }, { status: 400 });
+  // Use the funder wallet as the buyer so msg.sender matches voucher.buyer on-chain.
+  const funderKey =
+    network === "mainnet"
+      ? process.env.DOMA_MAINNET_FUNDER_PRIVATE_KEY
+      : process.env.DOMA_TESTNET_FUNDER_PRIVATE_KEY;
+  if (!funderKey) {
+    return Response.json({ error: `Missing funder key for ${network}` }, { status: 500 });
   }
+  const funderAddress = privateKeyToAccount(funderKey as `0x${string}`).address;
 
   let d3Order;
   try {
-    d3Order = await createD3Order(sld, tld, ownerAddress, registrantContact, network);
+    d3Order = await createD3Order(sld, tld, funderAddress, registrantContact, network);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return Response.json({ error: message }, { status: 409 });
