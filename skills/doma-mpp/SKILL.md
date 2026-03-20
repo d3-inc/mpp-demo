@@ -42,14 +42,15 @@ const response = await mppx.fetch(url);
 ## The /register endpoint
 
 ```
-GET /api/register?domain={domain}&network={network}&contact={contact}
+GET /api/register?domain={domain}&network={network}&address={address}&contact={contact}
 ```
 
-| Parameter | Location | Required | Description                                                                |
-| --------- | -------- | -------- | -------------------------------------------------------------------------- |
-| `domain`  | query    | yes      | Full domain including TLD (e.g. `example.com`)                             |
-| `network` | query    | yes      | `"testnet"` or `"mainnet"`                                                 |
-| `contact` | query    | yes      | URL-encoded JSON registrant contact info (at minimum must include `email`) |
+| Parameter | Location | Required | Description                                                                                    |
+| --------- | -------- | -------- | ---------------------------------------------------------------------------------------------- |
+| `domain`  | query    | yes      | Full domain including TLD (e.g. `example.com`)                                                 |
+| `network` | query    | yes      | `"testnet"` or `"mainnet"`                                                                     |
+| `address` | query    | yes      | Caller's wallet address (used for mainnet allowlist check via `ALLOWED_DOMA_MAINNET_ADDRESSES`) |
+| `contact` | query    | yes      | URL-encoded JSON registrant contact info (at minimum must include `email`)                      |
 
 **Supported TLDs:** `com`, `xyz`, `ai`, `io`, `net`, `cash`, `live`, `fyi`
 
@@ -88,6 +89,7 @@ Mppx.create({ methods: [tempo({ account })] });
 
 const domain = "example.com";
 const network = "testnet";
+const address = account.address;
 
 const contact = JSON.stringify({
   firstName: "Jane",
@@ -105,7 +107,7 @@ const contact = JSON.stringify({
   countryCode: "US",
 });
 
-const url = `https://mpp-demo.doma.xyz/api/register?domain=${encodeURIComponent(domain)}&network=${network}&contact=${encodeURIComponent(contact)}`;
+const url = `https://mpp-demo.doma.xyz/api/register?domain=${encodeURIComponent(domain)}&network=${network}&address=${encodeURIComponent(address)}&contact=${encodeURIComponent(contact)}`;
 
 const response = await fetch(url);
 const data = await response.json();
@@ -138,6 +140,7 @@ console.log(data);
 | ------- | ---------------------------------------------------------------------------------------------------------------- |
 | **400** | Invalid network, missing domain, domain missing TLD, unsupported TLD, or invalid order metadata |
 | **402** | Payment required (handled automatically by `mppx`)                                                               |
+| **403** | Payer address not in mainnet allowlist (`ALLOWED_DOMA_MAINNET_ADDRESSES`)                                         |
 | **409** | Domain not available for registration                                                                            |
 | **500** | On-chain registration transaction failed                                                                         |
 
@@ -202,10 +205,10 @@ Use the `-r` flag or the `RPC_URL` environment variable:
 
 ```bash
 # Using -r flag
-npx mppx --account main -r https://rpc.tempo.xyz "https://mpp-demo.doma.xyz/api/register?domain=example.com&network=mainnet&contact=..."
+npx mppx --account main -r https://rpc.tempo.xyz "https://mpp-demo.doma.xyz/api/register?domain=example.com&network=mainnet&address=0x...&contact=..."
 
 # Using environment variable
-RPC_URL=https://rpc.tempo.xyz npx mppx --account main "https://mpp-demo.doma.xyz/api/register?domain=example.com&network=mainnet&contact=..."
+RPC_URL=https://rpc.tempo.xyz npx mppx --account main "https://mpp-demo.doma.xyz/api/register?domain=example.com&network=mainnet&address=0x...&contact=..."
 ```
 
 | Network | RPC URL                          |

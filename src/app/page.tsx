@@ -396,7 +396,7 @@ export default function Home() {
                   onClick={() =>
                     makeRequest(
                       `register-${network}`,
-                      `/api/register?domain=${encodeURIComponent(domainName.trim() + "." + domainTld)}&network=${network}&contact=${encodeURIComponent(JSON.stringify(contact))}`,
+                      `/api/register?domain=${encodeURIComponent(domainName.trim() + "." + domainTld)}&network=${network}&address=${encodeURIComponent(accountAddress)}&contact=${encodeURIComponent(JSON.stringify(contact))}`,
                     )
                   }
                   disabled={!isInitialized || !isValidSld(domainName) || !!loadingId}

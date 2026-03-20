@@ -126,6 +126,21 @@ export async function GET(request: Request) {
     return handler(request);
   }
 
+  // Mainnet: only allow whitelisted payer addresses (checked before 402 so no money is taken)
+  if (network === "mainnet") {
+    const allowed = (process.env.ALLOWED_DOMA_MAINNET_ADDRESSES ?? "")
+      .split(",")
+      .map((a) => a.trim().toLowerCase())
+      .filter(Boolean);
+    const callerAddress = (url.searchParams.get("address") ?? "").toLowerCase();
+    if (allowed.length > 0 && !allowed.includes(callerAddress)) {
+      return Response.json(
+        { error: "Payer address is not authorized for mainnet registration." },
+        { status: 403 },
+      );
+    }
+  }
+
   // Initial request — check availability + USD price, create ETH order for voucher, issue 402
   const search = await searchAvailability(sld, tld, network);
   if (!search.available || !search.usdPrice) {
